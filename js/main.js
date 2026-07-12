@@ -1,3 +1,5 @@
+// js/main.js
+
 import { initScene } from './scene.js';
 import { PartList, jscadToThreeGeometry } from './jscad.js';
 import { updateTransform, deleteParts, duplicateParts, applyHollow } from './editor.js';
@@ -24,10 +26,10 @@ Object.assign(selectionBoxEl.style, { position: 'fixed', border: '1px solid #009
 document.body.appendChild(selectionBoxEl);
 let isSelecting = false, startPoint = { x: 0, y: 0 };
 
-// Ruler/Dimension Overlay Pool (Max 60 labels for high performance)
+// Ruler/Dimension Overlay Pool (Max 150 labels for high performance)
 const labelContainer = document.getElementById('dimension-labels');
 const labelPool = [];
-for (let i = 0; i < 60; i++) {
+for (let i = 0; i < 150; i++) {
     const div = document.createElement('div');
     div.className = 'dim-label';
     div.style.display = 'none';
@@ -92,28 +94,59 @@ function generatePreview() {
 function renderLabels() {
     let labelIdx = 0;
 
-    if (showRuler && selectedMeshes.length > 0) {
+    if (showRuler) {
         const width = container.clientWidth;
         const height = container.clientHeight;
 
-        selectedMeshes.forEach(mesh => {
+        // Collect distinct parts to measure: include all selected solid parts, and all holes in the scene
+        const meshesToLabel = Array.from(new Set([...selectedMeshes, ...holeMeshes]));
+
+        meshesToLabel.forEach(mesh => {
             if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
             const box = mesh.geometry.boundingBox;
             const min = box.min;
             const max = box.max;
 
-            // Compute mm dimensions strictly matching the mesh scaling 
-            const valX = Math.abs(max.x - min.x) * mesh.scale.x;
-            const valY = Math.abs(max.y - min.y) * mesh.scale.y;
-            const valZ = Math.abs(max.z - min.z) * mesh.scale.z;
+            // Compute mm dimensions strictly matching the mesh's global world scale 
+            const worldScale = new THREE.Vector3();
+            mesh.getWorldScale(worldScale);
+            const valX = Math.abs(max.x - min.x) * worldScale.x;
+            const valY = Math.abs(max.y - min.y) * worldScale.y;
+            const valZ = Math.abs(max.z - min.z) * worldScale.z;
 
             // Plot dimension anchors exactly on the geometry bounds
             const offset = 0.5; // push labels out slightly to prevent clipping
-            const pts = [
-                { p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: valX, color: '#ff6666', prefix: 'W' }, // Width/X
-                { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: 'D' }, // Depth/Y
-                { p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: valZ, color: '#66aaff', prefix: 'H' }  // Height/Z
-            ];
+            let pts = [];
+
+            const eps = 0.05;
+            let isCylinder = false;
+            let dia = 0, len = 0, lenAxis = '';
+
+            // Check for cylinders (two local axes are equal, the third differs)
+            if (Math.abs(valX - valY) < eps && Math.abs(valY - valZ) > eps) { isCylinder = true; dia = valX; len = valZ; lenAxis = 'Z'; }
+            else if (Math.abs(valX - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valX; len = valY; lenAxis = 'Y'; }
+            else if (Math.abs(valY - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valY; len = valX; lenAxis = 'X'; }
+
+            if (isCylinder && mesh.userData.type === 'hole') {
+                // Formatting for circular cutouts (Diameter and Length)
+                if (lenAxis === 'Z') {
+                    pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: dia, color: '#ffcc00', prefix: 'Ø' });
+                    pts.push({ p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: len, color: '#66aaff', prefix: 'L' });
+                } else if (lenAxis === 'Y') {
+                    pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: dia, color: '#ffcc00', prefix: 'Ø' });
+                    pts.push({ p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: len, color: '#66ff66', prefix: 'L' });
+                } else { // X
+                    pts.push({ p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: dia, color: '#ffcc00', prefix: 'Ø' });
+                    pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: len, color: '#ff6666', prefix: 'L' });
+                }
+            } else {
+                // Formatting for rectangular cubes, unions, or solids (Width, Depth, Height)
+                pts = [
+                    { p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: valX, color: '#ff6666', prefix: 'W' },
+                    { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: 'D' },
+                    { p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: valZ, color: '#66aaff', prefix: 'H' }
+                ];
+            }
 
             pts.forEach(axis => {
                 if (axis.val > 0.01 && labelIdx < labelPool.length) {
@@ -121,7 +154,7 @@ function renderLabels() {
                     mesh.localToWorld(worldPt);
                     worldPt.project(camera);
 
-                    // Only render if in front of the camera
+                    // Only render if in front of the camera bounds
                     if (worldPt.z < 1) { 
                         const x = (worldPt.x * 0.5 + 0.5) * width;
                         const y = -(worldPt.y * 0.5 - 0.5) * height;
@@ -278,6 +311,9 @@ document.getElementById('btn-toggle-ruler').addEventListener('click', (e) => {
         textSpan.innerText = showRuler ? 'Ruler: ON' : 'Ruler: OFF';
     }
     const btn = document.getElementById('btn-toggle-ruler');
+    
+    // Updates internal HTML logic to reflect toggle status cleanly
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 6v4M10 6v2M14 6v4M18 6v2"/></svg> Ruler: ${showRuler ? 'ON' : 'OFF'}`;
     btn.classList.toggle('active', showRuler);
 });
 
