@@ -24,6 +24,13 @@ function main(parts) {
   const outerBottom = translate([0, 0, bottomHeight / 2], cuboid({size: [80, 128, bottomHeight]}));
   let solid = union(outerMain, outerBottom);
 
+  // Scaled 45-degree structural transition chamfers bridging the bottom base to the wider main body
+  // Applied ONLY to the front and back (Sides left flat for servo clearance)
+  const chSize = 22.62; 
+  const frontChamfer = translate([0, -64, bottomHeight], rotateX(Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
+  const backChamfer = translate([0, 64, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
+  solid = union(solid, frontChamfer, backChamfer);
+
   // 2. INNER CUTOUTS (Hollowing)
   const innerMainBase = roundedRectangle({ size: [overallWidth - wallThickness * 2, overallDepth - wallThickness * 2], roundRadius: cornerRadius - 1, segments: 32 });
   const innerMain = translate([0, 0, bottomHeight + wallThickness], extrudeLinear({height: mainHeight + 10}, innerMainBase));
