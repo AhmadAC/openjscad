@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular JSCAD & Three.js Editor</title>
+    
+    <link rel="stylesheet" href="styles.css">
+
+    <!-- Three.js Core & Addons (Loaded globally for simplicity) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
+    
+    <!-- JSCAD Modeling (OpenJSCAD v2) -->
+    <script src="https://unpkg.com/@jscad/modeling@2.12.1/dist/jscad-modeling.min.js"></script>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Editor Panel -->
+        <div id="editor-panel">
+            <div class="toolbar">
+                <button id="btn-generate" title="Run Script">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="currentColor" stroke-linejoin="round" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run
+                </button>
+                <div class="separator"></div>
+                <select id="mode-select" title="Interaction Mode">
+                    <option value="orbit">Orbit</option>
+                    <option value="translate">Move</option>
+                    <option value="rotate">Rotate</option>
+                    <option value="scale">Scale</option>
+                </select>
+                <button id="btn-duplicate" title="Duplicate (Ctrl+C)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+                <button id="btn-delete" class="danger" title="Delete (Del)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+                <div class="separator"></div>
+                <button id="btn-toggle-ruler" title="Show Dimensions of Selected">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 6v4M10 6v2M14 6v4M18 6v2"/></svg> Ruler: OFF
+                </button>
+                <div class="separator"></div>
+                <button id="btn-recenter" title="Recenter View">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button id="btn-zoomin" title="Zoom In">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </button>
+                <button id="btn-zoomout" title="Zoom Out">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </button>
+                <div class="separator"></div>
+                <button id="btn-export" title="Export STL">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> STL
+                </button>
+            </div>
+            
+            <!-- Text area for the OpenJSCAD Editor -->
+            <textarea id="code-editor" spellcheck="false"></textarea>
+        </div>
+
+        <div id="divider">
+            <div id="btn-toggle" title="Expand/Collapse Editor">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+            </div>
+        </div>
+
+        <!-- 3D Preview Panel -->
+        <div id="preview-panel">
+            <div id="canvas-container"></div>
+            <!-- Labels Overlay -->
+            <div id="dimension-labels"></div>
+            
+            <div id="overlay-hint">
+                <b>Click</b> select | <b>Shift+Drag</b> multi-select<br>
+                <b>Arrows/WS</b> move | <b>Drag Red Ghost</b> to move holes
+            </div>
+        </div>
+
+        <!-- Right Divider for Tools Panel -->
+        <div id="divider-right">
+            <div id="btn-toggle-right" title="Expand/Collapse Tools">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+        </div>
+
+        <!-- Tools & Properties Panel -->
+        <div id="tools-panel">
+            <h3>
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                Create Shape
+            </h3>
+            <div class="tool-group">
+                <div class="input-row">
+                    <label>Type:</label>
+                    <select id="shape-select">
+                        <option value="cuboid">Rectangular Prism</option>
+                        <option value="cylinder">Cylinder</option>
+                        <option value="sphere">Sphere</option>
+                    </select>
+                </div>
+                <div id="shape-dims-container">
+                    <div class="input-row"><label>Width:</label><input type="number" id="dim-w" value="20"></div>
+                    <div class="input-row"><label>Depth:</label><input type="number" id="dim-d" value="20"></div>
+                    <div class="input-row"><label>Height:</label><input type="number" id="dim-h" value="20"></div>
+                </div>
+                <button id="btn-add-shape" class="full-btn">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Shape
+                </button>
+            </div>
+
+            <div id="selected-properties" style="display: none;">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Modify Selected
+                </h3>
+                
+                <div class="tool-group">
+                    <div class="input-row">
+                        <label><b>Make Hollow:</b></label>
+                        <input type="checkbox" id="toggle-hollow" style="flex: 0.2;">
+                    </div>
+                    <div class="input-row" id="hollow-settings" style="display:none; margin-top:5px;">
+                        <label title="Internal scaling factor (0.1 to 0.99)">Shell Scale:</label>
+                        <input type="number" id="hollow-factor" value="0.9" step="0.05" min="0.1" max="0.99">
+                    </div>
+                </div>
+
+                <h4>
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg> Add Cutout / Hole
+                </h4>
+                <div class="tool-group">
+                    <div class="input-row">
+                        <label>Type:</label>
+                        <select id="hole-type">
+                            <option value="circle">Circle/Cylinder</option>
+                            <option value="square">Square/Box</option>
+                            <option value="usb-c">USB-C Port</option>
+                            <option value="hc-sr04">HC-SR04 Sensor</option>
+                            <option value="sg90">SG90 Servo</option>
+                        </select>
+                    </div>
+                    
+                    <div class="input-row">
+                        <label>Style:</label>
+                        <select id="hole-style">
+                            <option value="through">Through Hole</option>
+                            <option value="indent">Indent (Blind)</option>
+                        </select>
+                    </div>
+
+                    <div id="hole-dims-container">
+                        <div class="input-row"><label>Radius:</label><input type="number" id="hole-r" value="3"></div>
+                    </div>
+
+                    <button id="btn-add-hole" class="full-btn">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg> Add Hole to Part
+                    </button>
+                </div>
+            </div>
+            
+            <div id="hole-properties" style="display: none;">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg> Hole Selected
+                </h3>
+                <p style="color:#aaa; font-size:12px; margin-top:0;">Use arrows or 3D gizmo to move this cutout. The solid part will automatically update.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Module Script -->
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
