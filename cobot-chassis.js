@@ -1,6 +1,6 @@
 // OpenJSCAD Script - Cobot Chassis & Lid
 const { booleans, colors, extrusions, primitives, transforms } = jscadModeling;
-const { subtract, union } = booleans;
+const { intersect, subtract, union } = booleans;
 const { colorize } = colors;
 const { extrudeLinear } = extrusions;
 const { cuboid, cylinder, roundedRectangle } = primitives;
@@ -24,14 +24,6 @@ function main(parts) {
   const outerBottom = translate([0, 0, bottomHeight / 2], cuboid({size: [80, 128, bottomHeight]}));
   let solid = union(outerMain, outerBottom);
 
-  // Scaled 45-degree structural transition chamfers bridging the bottom base to the wider main body
-  const chSize = 22.62; 
-  const leftChamfer = translate([-40, 0, bottomHeight], rotateY(Math.PI / 4, cuboid({ size: [chSize, 128, chSize] })));
-  const rightChamfer = translate([40, 0, bottomHeight], rotateY(-Math.PI / 4, cuboid({ size: [chSize, 128, chSize] })));
-  const frontChamfer = translate([0, -64, bottomHeight], rotateX(Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
-  const backChamfer = translate([0, 64, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
-  solid = union(solid, leftChamfer, rightChamfer, frontChamfer, backChamfer);
-
   // 2. INNER CUTOUTS (Hollowing)
   const innerMainBase = roundedRectangle({ size: [overallWidth - wallThickness * 2, overallDepth - wallThickness * 2], roundRadius: cornerRadius - 1, segments: 32 });
   const innerMain = translate([0, 0, bottomHeight + wallThickness], extrudeLinear({height: mainHeight + 10}, innerMainBase));
@@ -40,12 +32,26 @@ function main(parts) {
   const innerBottomDepth = 128.0 - (wallThickness * 2); 
   const innerBottom = translate([0, 0, (bottomHeight + 10) / 2 + 2], cuboid({size: [innerBottomWidth, innerBottomDepth, bottomHeight + 10]}));
   
-  let hollow = union(innerMain, innerBottom);
+  const hollow = union(innerMain, innerBottom);
   solid = subtract(solid, hollow);
 
-  // 2.5 ADD LID MOUNTING BLOCK (Inside top edge of the back wall)
-  // This gives the M2 screw 10mm of solid plastic to bite into.
-  const mountBlock = translate([0, 76.0, totalHeight - 5.0], cuboid({size: [12.0, 4.0, 10.0]}));
+  // 2.1 CORNER SUPPORT TABS FOR THE LID
+  // Lowered by exactly 5mm. Center Z = 85.8, Height = 10.0 
+  // This means the top surface is exactly at 90.8 (leaving 5.0mm for the lid to sit flush inside)
+  const tabZ = totalHeight - 10.0; 
+  const rawTabs = union(
+      translate([-76, -76, tabZ], cuboid({size: [12.0, 12.0, 10.0]})),
+      translate([ 76, -76, tabZ], cuboid({size: [12.0, 12.0, 10.0]})),
+      translate([-76,  76, tabZ], cuboid({size: [12.0, 12.0, 10.0]})),
+      translate([ 76,  76, tabZ], cuboid({size: [12.0, 12.0, 10.0]}))
+  );
+  
+  // Intersect with 'innerMain' guarantees they perfectly conform to the inner curved walls
+  const cornerTabs = intersect(rawTabs, innerMain);
+  solid = union(solid, cornerTabs);
+
+  // 2.5 ADD LID MOUNTING BLOCK (Lowered to perfectly match the corner tabs)
+  const mountBlock = translate([0, 76.0, totalHeight - 10.0], cuboid({size: [12.0, 4.0, 10.0]}));
   solid = union(solid, mountBlock);
 
   // 3. MAIN CHASSIS ASSEMBLY
@@ -57,7 +63,7 @@ function main(parts) {
   // 3.5 LID FASTENER HOLE IN CHASSIS (1.7mm Pilot for M2 thread)
   const lidPilotHole = cylinder({radius: 0.85, height: 15.0, segments: 16});
   parts.addHole("CobotChassis", "LidScrewHole", lidPilotHole);
-  parts.pos("LidScrewHole", [0.00, 76.00, 95.80 - 5.0]); 
+  parts.pos("LidScrewHole", [0.00, 76.00, totalHeight - 10.0]); // Lowered hole center to match mount block
   parts.rot("LidScrewHole", [0.00, 0.00, 0.00]);
   parts.scale("LidScrewHole", [1.00, 1.00, 1.00]);
 
@@ -114,7 +120,7 @@ function main(parts) {
 
   // 7. GENERATE AND POSITION THE LID
   parts.add("CobotLid", buildLid());
-  parts.pos("CobotLid", [170.00, 0.00, 5.00]); // Shifted right and lifted 5mm to sit level on the grid
+  parts.pos("CobotLid", [170.00, 0.00, 0.00]); // Placed flat on Z=0
   parts.rot("CobotLid", [0.00, 0.00, 0.00]);
   parts.scale("CobotLid", [1.00, 1.00, 1.00]);
 
@@ -126,27 +132,15 @@ function main(parts) {
 // ------------------------------------
 
 function buildLid() {
-    const lidThick = 5.0; // Thickened to 5.0mm. Prevents PLA warping from motor/ESP heat & ambient temps
-    const lipDepth = 5.0; // Thickened to 5.0mm deep flange for structural rigidity
+    const lidThick = 5.0; 
     
-    // 1. Main flat top (Matches 160x160 chassis outer dimension perfectly)
-    const lidBase = roundedRectangle({ size: [160, 160], roundRadius: 12.0, segments: 32 });
-    const lidMain = translate([0, 0, lidThick / 2], extrudeLinear({height: lidThick}, lidBase));
+    // 1. Flush Solid Plate (Fits entirely INSIDE the chassis)
+    // The chassis inner cavity is 156.0. We make the lid 155.4 for a perfect slide-in snap fit.
+    const lidBase = roundedRectangle({ size: [155.4, 155.4], roundRadius: 10.7, segments: 32 });
+    let lidSolid = translate([0, 0, lidThick / 2], extrudeLinear({height: lidThick}, lidBase));
     
-    // 2. Inner Flange / Groove
-    // Inner chassis is 156x156. We make the lip 155.4 to give a 0.3mm slide-fit gap all around.
-    const lipBase = roundedRectangle({ size: [155.4, 155.4], roundRadius: 10.7, segments: 32 });
-    const lidLip = translate([0, 0, -lipDepth / 2], extrudeLinear({height: lipDepth}, lipBase));
-    
-    let lidSolid = union(lidMain, lidLip);
-    
-    // 3. Cut a notch in the lip to clear the mounting block we added to the chassis
-    const blockCutout = translate([0, 76.5, -lipDepth / 2], cuboid({size: [14.0, 5.0, lipDepth + 2.0]}));
-    lidSolid = subtract(lidSolid, blockCutout);
-    
-    // 4. M2 Screw Pass-through and Countersink Hole
-    const clearanceHole = cylinder({radius: 1.15, height: 15.0, segments: 16}); // 2.3mm hole, extended height for thick lid
-    // Counterbore adjusted for the thick lid to keep the M2 head recessed and bite into the plastic
+    // 2. M2 Screw Pass-through and Countersink Hole
+    const clearanceHole = cylinder({radius: 1.15, height: 15.0, segments: 16}); 
     const counterbore = translate([0, 0, lidThick - 1.0], cylinder({radius: 2.2, height: 3.0, segments: 32})); 
     
     const screwHole = translate([0, 76.0, 0], union(clearanceHole, counterbore));
