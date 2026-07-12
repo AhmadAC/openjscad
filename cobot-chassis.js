@@ -38,6 +38,7 @@ function main(parts) {
   
   const innerBottomWidth = 80.0 - (wallThickness * 2); 
   const innerBottomDepth = 128.0 - (wallThickness * 2); 
+  // Floor ends up exactly 2.0mm thick (Z=0 to Z=2)
   const innerBottom = translate([0, 0, (bottomHeight + 10) / 2 + 2], cuboid({size: [innerBottomWidth, innerBottomDepth, bottomHeight + 10]}));
   
   let hollow = union(innerMain, innerBottom);
@@ -63,30 +64,32 @@ function main(parts) {
   parts.rot("SensorRight", [0.00, 0.00, 0.00]);
   parts.scale("SensorRight", [1.00, 1.00, 1.00]);
 
-  // 5. SIDE-WALL MG90S SERVOS (Corrected dimensions, spread 90mm apart horizontally!)
+  // 5. SIDE-WALL MG90S SERVOS
   const servoShape = sg90Cutout();
 
+  // Z-height dropped to 8.25mm. The cutout is 12.5mm high, meaning its bottom edge 
+  // hits exactly at Z = 2.0mm, making the servo rest perfectly flush against the inner floor.
   parts.addHole("CobotChassis", "ServoFL", servoShape);
-  parts.pos("ServoFL", [-32.50, -45.00, 16.00]);
+  parts.pos("ServoFL", [-32.50, -45.00, 8.25]);
   parts.rot("ServoFL", [0.00, 0.00, 0.00]);
   parts.scale("ServoFL", [1.00, 1.00, 1.00]);
 
   parts.addHole("CobotChassis", "ServoRL", servoShape);
-  parts.pos("ServoRL", [-32.50, 45.00, 16.00]);
+  parts.pos("ServoRL", [-32.50, 45.00, 8.25]);
   parts.rot("ServoRL", [0.00, 0.00, 0.00]);
   parts.scale("ServoRL", [1.00, 1.00, 1.00]);
 
   parts.addHole("CobotChassis", "ServoFR", servoShape);
-  parts.pos("ServoFR", [32.50, -45.00, 16.00]);
+  parts.pos("ServoFR", [32.50, -45.00, 8.25]);
   parts.rot("ServoFR", [0.00, 0.00, 0.00]);
   parts.scale("ServoFR", [1.00, 1.00, 1.00]);
 
   parts.addHole("CobotChassis", "ServoRR", servoShape);
-  parts.pos("ServoRR", [32.50, 45.00, 16.00]);
+  parts.pos("ServoRR", [32.50, 45.00, 8.25]);
   parts.rot("ServoRR", [0.00, 0.00, 0.00]);
   parts.scale("ServoRR", [1.00, 1.00, 1.00]);
 
-  // 6. BACK WALL CUTOUTS (Speaker + Snap-Fit Switch shifted to new Back Wall)
+  // 6. BACK WALL CUTOUTS
   parts.addHole("CobotChassis", "SpeakerBack", speakerCutout(), { type: 'speaker', cornerR: 4.0 });
   parts.pos("SpeakerBack", [0.00, 80.00, 60.00]);
   parts.rot("SpeakerBack", [0.00, 0.00, 0.00]);
@@ -94,7 +97,7 @@ function main(parts) {
 
   // Strictly 8.4 x 8.4mm hole on the face, with a 20mm depth to cleanly cut the wall
   parts.addHole("CobotChassis", "SwitchBack", cuboid({size: [8.4, 20.0, 8.4]}));
-  parts.pos("SwitchBack", [35.00, 80.00, 60.00]); // Shifted further right to clear the speaker
+  parts.pos("SwitchBack", [35.00, 80.00, 60.00]); 
   parts.rot("SwitchBack", [0.00, 0.00, 0.00]);
   parts.scale("SwitchBack", [1.00, 1.00, 1.00]);
 
@@ -110,17 +113,19 @@ function hcSr04Cutout() {
 }
 
 function sg90Cutout() {
-    // MG90S Specs from schematic: Body 22.8L x 12.1W
-    // Added 0.4mm tolerance for easy 3D printing fit: 23.2 x 12.5
+    // MG90S Specs from diagram: Body 22.8mm L x 12.1mm W
+    // Adding exactly 0.4mm tolerance for FDM PLA shrinkage: 23.2 x 12.5
     // X is 20.0 to ensure a clean boolean cut through the chassis wall.
     const slot = cuboid({size: [20.0, 23.2, 12.5]});
     
-    // Schematic shows Φ2.2 for the servo tabs. 
-    // We use a 2.0mm diameter (1.0 radius) to allow M2 screws to thread securely into the plastic.
+    // Diagram shows Φ2.2 for the servo tabs. 
+    // Radius 1.0 (2.0mm diameter) is perfect for PLA. It provides enough grab 
+    // for standard M2 / M2.2 self-tapping screws to thread securely without splitting layers.
     const screwRadius = 1.0;
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
     
-    // Center-to-center screw spacing is exactly 28.3mm (14.15mm offset from center)
+    // Diagram strictly defines center-to-center screw spacing as 28.3mm.
+    // 28.3 / 2 = 14.15mm offset from center.
     const screw1 = translate([0, 14.15, 0], screw);
     const screw2 = translate([0, -14.15, 0], screw);
     
