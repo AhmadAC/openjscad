@@ -38,7 +38,7 @@ function main(parts) {
   
   const innerBottomWidth = 80.0 - (wallThickness * 2); 
   const innerBottomDepth = 128.0 - (wallThickness * 2); 
-  // Floor ends up exactly 2.0mm thick (Z=0 to Z=2)
+  // Central floor ends up exactly 2.0mm thick (Z=0 to Z=2)
   const innerBottom = translate([0, 0, (bottomHeight + 10) / 2 + 2], cuboid({size: [innerBottomWidth, innerBottomDepth, bottomHeight + 10]}));
   
   let hollow = union(innerMain, innerBottom);
@@ -94,9 +94,11 @@ function main(parts) {
   parts.scale("SpeakerBack", [1.00, 1.00, 1.00]);
 
   // Left Side: 7mm Circular Hole for Magnetic USB-C Cable (Radius = 3.5mm)
+  // Lifted to Z=45.0. Floor is at Z=34.0, which means center of hole is 11mm above floor.
+  // Perfect for the magnetic tip clearance and lines up with a 19-24mm thick resting battery.
   const chargePort = rotateX(Math.PI / 2, cylinder({radius: 3.5, height: 20.0, segments: 32}));
   parts.addHole("CobotChassis", "ChargePort", chargePort);
-  parts.pos("ChargePort", [-35.00, 80.00, 60.00]); // Mirrored symmetrically to the power switch
+  parts.pos("ChargePort", [-60.00, 80.00, 45.00]); 
   parts.rot("ChargePort", [0.00, 0.00, 0.00]);
   parts.scale("ChargePort", [1.00, 1.00, 1.00]);
 
@@ -128,18 +130,14 @@ function sg90Cutout() {
 }
 
 function speakerCutout() {
-    // 2831 Speaker Specs: Body 27.1mm x 27.1mm
-    // Hole sized slightly larger for tolerance (27.5mm)
     const size = 27.5; 
     const depth = 20.0;
     const mainBox = cuboid({size: [size, size, depth]});
     
-    // We subtract cylinders from the corners of this cut-block.
-    // This LEAVES plastic in the corners of the chassis wall for mounting tabs.
     const cutRadius = 4.5;
     const cutCyl = cylinder({radius: cutRadius, height: depth + 2, segments: 32});
     
-    const offset = size / 2; // 13.75mm offset
+    const offset = size / 2; 
     const tl = translate([-offset, offset, 0], cutCyl);
     const tr = translate([offset, offset, 0], cutCyl);
     const bl = translate([-offset, -offset, 0], cutCyl);
@@ -147,12 +145,9 @@ function speakerCutout() {
     
     let shape = subtract(mainBox, tl, tr, bl, br);
     
-    // Now we ADD small M2 screw-hole cylinders to those exact corners.
-    // This will drill a 2mm diameter hole into the mounting tabs we just preserved.
-    const screwRadius = 1.0; // 2mm diameter for M2 screws
+    const screwRadius = 1.0; 
     const screwCyl = cylinder({radius: screwRadius, height: depth + 4, segments: 16});
     
-    // Diagram strictly defines center-to-center screw spacing as 23mm (11.5mm offset).
     const screwOffset = 11.5;
     const stl = translate([-screwOffset, screwOffset, 0], screwCyl);
     const str = translate([screwOffset, screwOffset, 0], screwCyl);
