@@ -20,11 +20,9 @@ function main(parts) {
   const outerMainBase = roundedRectangle({ size: [overallWidth, overallDepth], roundRadius: cornerRadius, segments: 32 });
   const outerMain = translate([0, 0, bottomHeight], extrudeLinear({height: mainHeight}, outerMainBase));
   
-  // Bottom undercarriage block: width 40, depth 64
   const outerBottom = translate([0, 0, bottomHeight / 2], cuboid({size: [40, 64, bottomHeight]}));
   let solid = union(outerMain, outerBottom);
 
-  // Add 45-degree structural transition chamfers bridging the bottom base to the wider main body
   const chSize = 11.31; 
   const leftChamfer = translate([-20, 0, bottomHeight], rotateY(Math.PI / 4, cuboid({ size: [chSize, 64, chSize] })));
   const rightChamfer = translate([20, 0, bottomHeight], rotateY(-Math.PI / 4, cuboid({ size: [chSize, 64, chSize] })));
@@ -32,11 +30,10 @@ function main(parts) {
   const backChamfer = translate([0, 32, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [40, chSize, chSize] })));
   solid = union(solid, leftChamfer, rightChamfer, frontChamfer, backChamfer);
 
-  // 2. INNER CUTOUTS (Hollowing)
+  // 2. INNER CUTOUTS
   const innerMainBase = roundedRectangle({ size: [overallWidth - wallThickness * 2, overallDepth - wallThickness * 2], roundRadius: cornerRadius - 1, segments: 32 });
   const innerMain = translate([0, 0, bottomHeight + wallThickness], extrudeLinear({height: mainHeight + 10}, innerMainBase));
   
-  // Widened lower cavity. 
   const innerBottomWidth = 40.0 - (wallThickness * 2); 
   const innerBottomDepth = 64.0 - (wallThickness * 2); 
   const innerBottom = translate([0, 0, (bottomHeight + 10) / 2 + 2], cuboid({size: [innerBottomWidth, innerBottomDepth, bottomHeight + 10]}));
@@ -44,36 +41,60 @@ function main(parts) {
   let hollow = union(innerMain, innerBottom);
   solid = subtract(solid, hollow);
 
-  // 3. HC-SR04 FRONT FACE HOLES
-  const holeRadius = 8.2;
-  const sensorLeft = translate([-12.75, -overallDepth / 2, bottomHeight + 14], rotateX(Math.PI / 2, cylinder({radius: holeRadius, height: 20, segments: 32})));
-  const sensorRight = translate([12.75, -overallDepth / 2, bottomHeight + 14], rotateX(Math.PI / 2, cylinder({radius: holeRadius, height: 20, segments: 32})));
-  solid = subtract(solid, sensorLeft, sensorRight);
-
-  // 4. SUBTRACT 4x SIDE-WALL MG90S SERVOS
-  const sg90_FL = translate([-12.50, -16.00, bottomHeight / 2], sg90Cutout());
-  const sg90_RL = translate([-12.50, 16.00, bottomHeight / 2], sg90Cutout());
-  const sg90_FR = translate([12.50, -16.00, bottomHeight / 2], sg90Cutout());
-  const sg90_RR = translate([12.50, 16.00, bottomHeight / 2], sg90Cutout());
-  solid = subtract(solid, sg90_FL, sg90_RL, sg90_FR, sg90_RR);
-
-  // 5. BACK WALL CUTOUTS (Speaker + Snap-Fit Switch)
-  // Height chosen to vertically center the 27.1mm speaker within the available upper space
-  const backZCenter = 32.0; 
-  
-  // Speaker Cutout centered exactly where the USB-C was
-  const speaker_Back = translate([0.00, 40.00, backZCenter], speakerCutout());
-  
-  // 8.4 x 8.4mm Snap fit Switch placed to the right side of the speaker
-  const switch_Back = translate([24.00, 40.00, backZCenter], cuboid({size: [8.4, 15.0, 8.4]})); 
-  
-  solid = subtract(solid, speaker_Back, switch_Back);
-
-  // 6. MAIN CHASSIS ASSEMBLY
+  // 3. MAIN CHASSIS ASSEMBLY
   parts.add("CobotChassis", solid);
   parts.pos("CobotChassis", [0.00, 0.00, 0.00]);
   parts.rot("CobotChassis", [0.00, 0.00, 0.00]);
   parts.scale("CobotChassis", [1.00, 1.00, 1.00]);
+
+  // 4. HC-SR04 FRONT FACE HOLES
+  const holeRadius = 8.2;
+  const sensorCylinder = rotateX(Math.PI / 2, cylinder({radius: holeRadius, height: 20, segments: 32}));
+  
+  parts.addHole("CobotChassis", "SensorLeft", sensorCylinder);
+  parts.pos("SensorLeft", [-12.75, -40.00, 30.00]);
+  parts.rot("SensorLeft", [0.00, 0.00, 0.00]);
+  parts.scale("SensorLeft", [1.00, 1.00, 1.00]);
+
+  parts.addHole("CobotChassis", "SensorRight", sensorCylinder);
+  parts.pos("SensorRight", [12.75, -40.00, 30.00]);
+  parts.rot("SensorRight", [0.00, 0.00, 0.00]);
+  parts.scale("SensorRight", [1.00, 1.00, 1.00]);
+
+  // 5. SIDE-WALL MG90S SERVOS
+  const servoShape = sg90Cutout();
+
+  parts.addHole("CobotChassis", "ServoFL", servoShape);
+  parts.pos("ServoFL", [-12.50, -16.00, 8.00]);
+  parts.rot("ServoFL", [0.00, 0.00, 0.00]);
+  parts.scale("ServoFL", [1.00, 1.00, 1.00]);
+
+  parts.addHole("CobotChassis", "ServoRL", servoShape);
+  parts.pos("ServoRL", [-12.50, 16.00, 8.00]);
+  parts.rot("ServoRL", [0.00, 0.00, 0.00]);
+  parts.scale("ServoRL", [1.00, 1.00, 1.00]);
+
+  parts.addHole("CobotChassis", "ServoFR", servoShape);
+  parts.pos("ServoFR", [12.50, -16.00, 8.00]);
+  parts.rot("ServoFR", [0.00, 0.00, 0.00]);
+  parts.scale("ServoFR", [1.00, 1.00, 1.00]);
+
+  parts.addHole("CobotChassis", "ServoRR", servoShape);
+  parts.pos("ServoRR", [12.50, 16.00, 8.00]);
+  parts.rot("ServoRR", [0.00, 0.00, 0.00]);
+  parts.scale("ServoRR", [1.00, 1.00, 1.00]);
+
+  // 6. BACK WALL CUTOUTS (Speaker + Snap-Fit Switch)
+  // Look here! We added the meta attributes to tell the render to add the corner label.
+  parts.addHole("CobotChassis", "SpeakerBack", speakerCutout(), { type: 'speaker', cornerR: 4.0 });
+  parts.pos("SpeakerBack", [0.00, 40.00, 32.00]);
+  parts.rot("SpeakerBack", [0.00, 0.00, 0.00]);
+  parts.scale("SpeakerBack", [1.00, 1.00, 1.00]);
+
+  parts.addHole("CobotChassis", "SwitchBack", cuboid({size: [8.4, 15.0, 8.4]}));
+  parts.pos("SwitchBack", [24.00, 40.00, 32.00]);
+  parts.rot("SwitchBack", [0.00, 0.00, 0.00]);
+  parts.scale("SwitchBack", [1.00, 1.00, 1.00]);
 
   return parts.render();
 }
@@ -87,38 +108,36 @@ function hcSr04Cutout() {
 }
 
 function sg90Cutout() {
-    // Exact Math implementation based on MG90S constraints:
     const slot = cuboid({size: [15.0, 24.23, 12.5]});
-    
-    // 1.95mm diameter cylinder for M2 Screws
     const screwRadius = 1.95 / 2;
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
-    
-    // Z-Offset required: MG90S mounting tabs are NOT centered vertically; they align with the spline.
     const zOffset = -1.95; 
-    
-    // Positioned exactly 28.3mm apart.
     const screw1 = translate([0, 14.15, zOffset], screw);
     const screw2 = translate([0, -14.15, zOffset], screw);
-    
     return union(slot, screw1, screw2);
 }
 
 function speakerCutout() {
-    // Main circular cutout for the speaker sound cone (22mm diameter for clearance)
-    const soundHole = cylinder({radius: 11.0, height: 15.0, segments: 32});
+    // Exact sizing for Enclosed Speaker (e.g. 3W 4Ohm cavity speakers)
+    const size = 28.0; 
+    const depth = 20.0;
     
-    // Thread-in small holes for M2/M2.5 Screws in PLA (1.8mm diameter hole)
-    const screwRadius = 0.9;
-    const screw = cylinder({radius: screwRadius, height: 15.0, segments: 16});
+    // Main Square Block
+    const mainBox = cuboid({size: [size, size, depth]});
     
-    // 23mm spacing (center to center) means an 11.5mm offset in each quadrant
-    const offset = 11.5; 
-    const tl = translate([-offset, offset, 0], screw);
-    const tr = translate([offset, offset, 0], screw);
-    const bl = translate([-offset, -offset, 0], screw);
-    const br = translate([offset, -offset, 0], screw);
+    // Circular corners mapped to clear the screw-hole mounting tabs
+    const cutRadius = 4.0;
+    const cutCyl = cylinder({radius: cutRadius, height: depth + 2, segments: 32});
     
-    // Union the shape and rotate it so it faces through the Y axis (front/back of robot)
-    return rotateX(Math.PI / 2, union(soundHole, tl, tr, bl, br));
+    const offset = size / 2;
+    const tl = translate([-offset, offset, 0], cutCyl);
+    const tr = translate([offset, offset, 0], cutCyl);
+    const bl = translate([-offset, -offset, 0], cutCyl);
+    const br = translate([offset, -offset, 0], cutCyl);
+    
+    // Subtract the cylinders to create the concave corners on the main shape
+    const shape = subtract(mainBox, tl, tr, bl, br);
+    
+    // Rotate so it faces perfectly outward along the Y axis
+    return rotateX(Math.PI / 2, shape);
 }

@@ -1,5 +1,3 @@
-// js/main.js
-
 import { initScene } from './scene.js';
 import { PartList, jscadToThreeGeometry } from './jscad.js';
 import { updateTransform, deleteParts, duplicateParts, applyHollow } from './editor.js';
@@ -18,7 +16,7 @@ scene.add(transformControl);
 
 // Added flatShading to make gradients pop across angled surfaces
 const matSolid = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.3, metalness: 0.2, side: THREE.DoubleSide, flatShading: true });
-const matHole = new THREE.MeshStandardMaterial({ color: 0xff3333, wireframe: false, transparent: true, opacity: 0.5, depthWrite: false });
+const matHole = new THREE.MeshStandardMaterial({ color: 0xff3333, wireframe: false, transparent: true, opacity: 0.0, depthWrite: false }); // Hidden
 
 // Rubber Band Box Element
 const selectionBoxEl = document.createElement('div');
@@ -26,7 +24,7 @@ Object.assign(selectionBoxEl.style, { position: 'fixed', border: '1px solid #009
 document.body.appendChild(selectionBoxEl);
 let isSelecting = false, startPoint = { x: 0, y: 0 };
 
-// Ruler/Dimension Overlay Pool (Max 150 labels for high performance)
+// Ruler/Dimension Overlay Pool
 const labelContainer = document.getElementById('dimension-labels');
 const labelPool = [];
 for (let i = 0; i < 150; i++) {
@@ -58,13 +56,13 @@ function generatePreview() {
                 if (res.type === 'part') {
                     const mesh = new THREE.Mesh(jscadToThreeGeometry(res.geom), matSolid.clone());
                     
-                    // Add Edge Lines so geometry shapes NEVER blend into themselves visually
                     const edgesGeom = new THREE.EdgesGeometry(mesh.geometry, 30);
                     const edgesMat = new THREE.LineBasicMaterial({ color: 0x001144, transparent: true, opacity: 0.4 });
                     const edges = new THREE.LineSegments(edgesGeom, edgesMat);
                     mesh.add(edges);
 
-                    mesh.userData = { id: res.id, type: 'part' };
+                    // Attach meta
+                    mesh.userData = { id: res.id, type: 'part', meta: res.meta };
                     mesh.position.set(...res.pos); mesh.rotation.set(...res.rot); mesh.scale.set(...res.scl);
                     scene.add(mesh); partMeshes.push(mesh);
                 }
@@ -75,15 +73,17 @@ function generatePreview() {
                     const parentMesh = partMeshes.find(m => m.userData.id === res.parentId);
                     if (parentMesh) {
                         const mesh = new THREE.Mesh(jscadToThreeGeometry(res.geom), matHole.clone());
-                        mesh.userData = { id: res.id, type: 'hole', parentId: res.parentId };
+                        // Attach meta
+                        mesh.userData = { id: res.id, type: 'hole', parentId: res.parentId, meta: res.meta };
                         mesh.position.set(...res.pos); mesh.rotation.set(...res.rot); mesh.scale.set(...res.scl);
+                        mesh.visible = false; 
+                        
                         parentMesh.add(mesh); holeMeshes.push(mesh);
                     }
                 }
             });
         }
 
-        // Re-select logic
         const restoredSelection = [...partMeshes, ...holeMeshes].filter(m => previouslySelectedIds.includes(m.userData.id));
         if (restoredSelection.length > 0) selectMeshes(restoredSelection);
 
@@ -98,7 +98,6 @@ function renderLabels() {
         const width = container.clientWidth;
         const height = container.clientHeight;
 
-        // Collect distinct parts to measure: include all selected solid parts, and all holes in the scene
         const meshesToLabel = Array.from(new Set([...selectedMeshes, ...holeMeshes]));
 
         meshesToLabel.forEach(mesh => {
@@ -107,28 +106,28 @@ function renderLabels() {
             const min = box.min;
             const max = box.max;
 
-            // Compute mm dimensions strictly matching the mesh's global world scale 
             const worldScale = new THREE.Vector3();
             mesh.getWorldScale(worldScale);
             const valX = Math.abs(max.x - min.x) * worldScale.x;
             const valY = Math.abs(max.y - min.y) * worldScale.y;
             const valZ = Math.abs(max.z - min.z) * worldScale.z;
 
-            // Plot dimension anchors exactly on the geometry bounds
-            const offset = 0.5; // push labels out slightly to prevent clipping
+            const offset = 0.5;
             let pts = [];
-
             const eps = 0.05;
+            
+            const meta = mesh.userData.meta || {};
             let isCylinder = false;
             let dia = 0, len = 0, lenAxis = '';
 
-            // Check for cylinders (two local axes are equal, the third differs)
-            if (Math.abs(valX - valY) < eps && Math.abs(valY - valZ) > eps) { isCylinder = true; dia = valX; len = valZ; lenAxis = 'Z'; }
-            else if (Math.abs(valX - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valX; len = valY; lenAxis = 'Y'; }
-            else if (Math.abs(valY - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valY; len = valX; lenAxis = 'X'; }
+            // If it's explicitly tagged as a complex shape like a speaker, DON'T evaluate it as a cylinder.
+            if (meta.type !== 'speaker') {
+                if (Math.abs(valX - valY) < eps && Math.abs(valY - valZ) > eps) { isCylinder = true; dia = valX; len = valZ; lenAxis = 'Z'; }
+                else if (Math.abs(valX - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valX; len = valY; lenAxis = 'Y'; }
+                else if (Math.abs(valY - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valY; len = valX; lenAxis = 'X'; }
+            }
 
             if (isCylinder && mesh.userData.type === 'hole') {
-                // Formatting for circular cutouts (Diameter and Length)
                 if (lenAxis === 'Z') {
                     pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: dia, color: '#ffcc00', prefix: 'Ø' });
                     pts.push({ p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: len, color: '#66aaff', prefix: 'L' });
@@ -140,12 +139,17 @@ function renderLabels() {
                     pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: len, color: '#ff6666', prefix: 'L' });
                 }
             } else {
-                // Formatting for rectangular cubes, unions, or solids (Width, Depth, Height)
+                // Formatting for solids and complex box cutouts
                 pts = [
                     { p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: valX, color: '#ff6666', prefix: 'W' },
-                    { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: 'D' },
+                    { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: mesh.userData.type === 'hole' ? 'L' : 'D' }, // Automatically swaps D for L if it's a hole!
                     { p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: valZ, color: '#66aaff', prefix: 'H' }
                 ];
+                
+                // Read custom metadata attributes mapping specifically assigned from cobot-chassis.js!
+                if (meta.type === 'speaker' && meta.cornerR) {
+                    pts.push({ p: new THREE.Vector3(max.x + offset, max.y + offset, max.z + offset), val: meta.cornerR, color: '#ffcc00', prefix: 'Corner R' });
+                }
             }
 
             pts.forEach(axis => {
@@ -154,7 +158,6 @@ function renderLabels() {
                     mesh.localToWorld(worldPt);
                     worldPt.project(camera);
 
-                    // Only render if in front of the camera bounds
                     if (worldPt.z < 1) { 
                         const x = (worldPt.x * 0.5 + 0.5) * width;
                         const y = -(worldPt.y * 0.5 - 0.5) * height;
@@ -171,14 +174,12 @@ function renderLabels() {
         });
     }
 
-    // Hide unused pool items to save layout calculations
     for (let i = labelIdx; i < labelPool.length; i++) {
         if (labelPool[i].style.display !== 'none') {
             labelPool[i].style.display = 'none';
         }
     }
 }
-
 
 // --- Selection & Raycasting ---
 const raycaster = new THREE.Raycaster();
@@ -200,11 +201,8 @@ function selectMeshes(meshes) {
     if (selectedMeshes.length === 1 && currentMode !== 'orbit') transformControl.attach(selectedMeshes[0]);
     else transformControl.detach();
 
-    // Toggle Properties UI Panel
     document.getElementById('selected-properties').style.display = (isPart && !isHole && selectedMeshes.length === 1) ? 'block' : 'none';
-    document.getElementById('hole-properties').style.display = (isHole && selectedMeshes.length === 1) ? 'block' : 'none';
 
-    // Auto-update UI panel from text
     if (isPart && selId) {
         const safeId = selId.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
         const match = editorEl.value.match(new RegExp(`parts\\.hollow\\(\\s*['"]${safeId}['"]\\s*,\\s*([0-9.]+)`));
@@ -306,13 +304,7 @@ document.getElementById('btn-generate').addEventListener('click', generatePrevie
 
 document.getElementById('btn-toggle-ruler').addEventListener('click', (e) => {
     showRuler = !showRuler;
-    const textSpan = document.getElementById('ruler-text');
-    if (textSpan) {
-        textSpan.innerText = showRuler ? 'Ruler: ON' : 'Ruler: OFF';
-    }
     const btn = document.getElementById('btn-toggle-ruler');
-    
-    // Updates internal HTML logic to reflect toggle status cleanly
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 6v4M10 6v2M14 6v4M18 6v2"/></svg> Ruler: ${showRuler ? 'ON' : 'OFF'}`;
     btn.classList.toggle('active', showRuler);
 });
@@ -333,7 +325,6 @@ document.getElementById('btn-delete').addEventListener('click', () => {
     generatePreview();
 });
 
-// Camera
 document.getElementById('btn-recenter').addEventListener('click', () => { controls.target.set(0,0,0); camera.position.set(60,-80,60); controls.update(); });
 document.getElementById('btn-zoomin').addEventListener('click', () => { camera.position.lerp(controls.target, 0.2); controls.update(); });
 document.getElementById('btn-zoomout').addEventListener('click', () => { camera.position.lerp(controls.target, -0.25); controls.update(); });
@@ -348,7 +339,7 @@ document.getElementById('btn-export').addEventListener('click', () => {
     link.download = 'model.stl'; link.click();
 });
 
-// Dynamic Inputs (Shapes)
+// Dynamic Inputs
 document.getElementById('shape-select').addEventListener('change', (e) => {
     const cont = document.getElementById('shape-dims-container');
     if (e.target.value === 'cuboid') cont.innerHTML = `<div class="input-row"><label>Width:</label><input type="number" id="dim-w" value="20"></div><div class="input-row"><label>Depth:</label><input type="number" id="dim-d" value="20"></div><div class="input-row"><label>Height:</label><input type="number" id="dim-h" value="20"></div>`;
@@ -369,7 +360,6 @@ document.getElementById('btn-add-shape').addEventListener('click', () => {
     generatePreview();
 });
 
-// Dynamic Inputs (Hollow)
 const triggerHollow = () => {
     if(selectedMeshes.length !== 1 || selectedMeshes[0].userData.type !== 'part') return;
     const isChecked = document.getElementById('toggle-hollow').checked;
@@ -383,7 +373,6 @@ document.getElementById('toggle-hollow').addEventListener('change', (e) => {
 });
 document.getElementById('hollow-factor').addEventListener('change', triggerHollow);
 
-// Dynamic Inputs (Holes)
 document.getElementById('hole-type').addEventListener('change', (e) => {
     const cont = document.getElementById('hole-dims-container');
     if (e.target.value === 'circle') cont.innerHTML = `<div class="input-row"><label>Radius:</label><input type="number" id="hole-r" value="3"></div>`;
@@ -418,7 +407,6 @@ document.getElementById('btn-add-hole').addEventListener('click', () => {
     generatePreview();
 });
 
-// Resizing & Toggles
 document.getElementById('btn-toggle').addEventListener('click', () => {
     const panel = document.getElementById('editor-panel');
     panel.classList.toggle('collapsed');
@@ -426,7 +414,6 @@ document.getElementById('btn-toggle').addEventListener('click', () => {
     if (icon) icon.style.transform = panel.classList.contains('collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
 });
 
-// Right Panel Toggle
 document.getElementById('btn-toggle-right').addEventListener('click', () => {
     const panel = document.getElementById('tools-panel');
     panel.classList.toggle('collapsed');
@@ -439,31 +426,18 @@ new ResizeObserver(() => {
     camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight);
 }).observe(container);
 
-// Run loop
 function animate() { 
     requestAnimationFrame(animate); 
     controls.update(); 
     renderer.render(scene, camera); 
-    renderLabels(); // Maps mm dimensions to the selected parts dynamically
+    renderLabels(); 
 }
 
-// Auto-Load Hook
 window.addEventListener('load', async () => {
     try {
         const response = await fetch('./cobot-chassis.js');
-        if (response.ok) {
-            editorEl.value = await response.text();
-        } else {
-            console.warn("Could not auto-load script, status: " + response.status);
-        }
-    } catch (err) {
-        console.warn("Fetch failed. Open via a local webserver (e.g., Live Server) to allow auto-loading.", err);
-    }
-    
-    if (!editorEl.value.trim()) {
-        editorEl.value = "// Script auto-load failed (CORS/Network error) or file is empty.\n// Paste your OpenJSCAD script here.";
-    }
-    
+        if (response.ok) editorEl.value = await response.text();
+    } catch (err) { }
     generatePreview();
 });
 

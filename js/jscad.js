@@ -4,18 +4,20 @@ export class PartList {
         this.holes = {}; 
     }
     
-    add(id, geom) { 
-        this.items[id] = { geom, pos: [0,0,0], rot: [0,0,0], scl: [1,1,1], hollow: 0, holes: [] }; 
+    // Accept a meta object argument and store it
+    add(id, geom, meta={}) { 
+        this.items[id] = { geom, pos: [0,0,0], rot: [0,0,0], scl: [1,1,1], hollow: 0, holes: [], meta }; 
     }
     pos(id, arr) { if(this.items[id]) this.items[id].pos = arr; else if(this.holes[id]) this.holes[id].pos = arr; }
     rot(id, arr) { if(this.items[id]) this.items[id].rot = arr; else if(this.holes[id]) this.holes[id].rot = arr; }
     scale(id, arr) { if(this.items[id]) this.items[id].scl = arr; else if(this.holes[id]) this.holes[id].scl = arr; }
     hollow(id, thickness) { if(this.items[id]) this.items[id].hollow = thickness; }
     
-    addHole(partId, holeId, geom) {
+    // Accept meta object on holes as well
+    addHole(partId, holeId, geom, meta={}) {
         if(this.items[partId]) {
             this.items[partId].holes.push(holeId);
-            this.holes[holeId] = { parent: partId, geom, pos: [0,0,0], rot: [0,0,0], scl: [1,1,1] };
+            this.holes[holeId] = { parent: partId, geom, pos: [0,0,0], rot: [0,0,0], scl: [1,1,1], meta };
         }
     }
     
@@ -42,12 +44,14 @@ export class PartList {
                 holeGeom = transforms.translate(h.pos, holeGeom);
                 finalGeom = booleans.subtract(finalGeom, holeGeom);
             }
-            results.push({ id, type: 'part', geom: finalGeom, pos: p.pos, rot: p.rot, scl: p.scl });
+            // Pass meta out to the renderer
+            results.push({ id, type: 'part', geom: finalGeom, pos: p.pos, rot: p.rot, scl: p.scl, meta: p.meta });
         }
         
         for (let hid in this.holes) {
             let h = this.holes[hid];
-            results.push({ id: hid, type: 'hole', parentId: h.parent, geom: h.geom, pos: h.pos, rot: h.rot, scl: h.scl });
+            // Pass meta out to the renderer
+            results.push({ id: hid, type: 'hole', parentId: h.parent, geom: h.geom, pos: h.pos, rot: h.rot, scl: h.scl, meta: h.meta });
         }
         return results;
     }
