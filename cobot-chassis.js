@@ -64,7 +64,7 @@ function main(parts) {
   parts.rot("SensorRight", [0.00, 0.00, 0.00]);
   parts.scale("SensorRight", [1.00, 1.00, 1.00]);
 
-  // 5. SIDE-WALL MG90S SERVOS (Flush to Z=2.0 inner floor)
+  // 5. SIDE-WALL MG90S SERVOS
   const servoShape = sg90Cutout();
 
   parts.addHole("CobotChassis", "ServoFL", servoShape);
@@ -93,16 +93,14 @@ function main(parts) {
   parts.rot("SpeakerBack", [0.00, 0.00, 0.00]);
   parts.scale("SpeakerBack", [1.00, 1.00, 1.00]);
 
-  // Left Side: 7mm Circular Hole for Magnetic USB-C Cable (Radius = 3.5mm)
-  // Lifted to Z=45.0. Floor is at Z=34.0, which means center of hole is 11mm above floor.
-  // Perfect for the magnetic tip clearance and lines up with a 19-24mm thick resting battery.
+  // Left Side: 7mm Circular Hole for Magnetic USB-C Cable (Z=45.0 gives clearance for battery)
   const chargePort = rotateX(Math.PI / 2, cylinder({radius: 3.5, height: 20.0, segments: 32}));
   parts.addHole("CobotChassis", "ChargePort", chargePort);
   parts.pos("ChargePort", [-60.00, 80.00, 45.00]); 
   parts.rot("ChargePort", [0.00, 0.00, 0.00]);
   parts.scale("ChargePort", [1.00, 1.00, 1.00]);
 
-  // Right Side: Snap-Fit Power Switch (8.4 x 8.4mm hole)
+  // Right Side: Snap-Fit Power Switch
   parts.addHole("CobotChassis", "SwitchBack", cuboid({size: [8.4, 20.0, 8.4]}));
   parts.pos("SwitchBack", [35.00, 80.00, 60.00]); 
   parts.rot("SwitchBack", [0.00, 0.00, 0.00]);
@@ -121,7 +119,9 @@ function hcSr04Cutout() {
 
 function sg90Cutout() {
     const slot = cuboid({size: [20.0, 23.2, 12.5]});
-    const screwRadius = 1.0;
+    
+    // Tightened to 1.7mm diameter for a stronger M2 thread grip in the plastic
+    const screwRadius = 0.85; 
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
     const screw1 = translate([0, 14.15, 0], screw);
     const screw2 = translate([0, -14.15, 0], screw);
@@ -130,31 +130,24 @@ function sg90Cutout() {
 }
 
 function speakerCutout() {
-    const size = 27.5; 
-    const depth = 20.0;
-    const mainBox = cuboid({size: [size, size, depth]});
+    // 1. Central Sound Port: WIDENED to 25mm diameter (12.5mm radius)
+    // This provides clearance for the raised thick ring on the front of the 2727 speaker
+    // ensuring the flat plastic mounting tabs can sit 100% flush against the inside wall.
+    const centerHole = cylinder({radius: 12.5, height: 20.0, segments: 64});
     
-    const cutRadius = 4.5;
-    const cutCyl = cylinder({radius: cutRadius, height: depth + 2, segments: 32});
+    // 2. M2 Screw Mounts: 1.6mm diameter (0.8mm radius) holes 
+    // This allows the metal screws to securely thread directly into solid PLA.
+    const screwRadius = 0.8; 
+    const screwCyl = cylinder({radius: screwRadius, height: 20.0, segments: 16});
     
-    const offset = size / 2; 
-    const tl = translate([-offset, offset, 0], cutCyl);
-    const tr = translate([offset, offset, 0], cutCyl);
-    const bl = translate([-offset, -offset, 0], cutCyl);
-    const br = translate([offset, -offset, 0], cutCyl);
-    
-    let shape = subtract(mainBox, tl, tr, bl, br);
-    
-    const screwRadius = 1.0; 
-    const screwCyl = cylinder({radius: screwRadius, height: depth + 4, segments: 16});
-    
+    // 3. Spacing: strictly 23mm center-to-center as per the diagram (11.5mm offset from center)
     const screwOffset = 11.5;
     const stl = translate([-screwOffset, screwOffset, 0], screwCyl);
     const str = translate([screwOffset, screwOffset, 0], screwCyl);
     const sbl = translate([-screwOffset, -screwOffset, 0], screwCyl);
     const sbr = translate([screwOffset, -screwOffset, 0], screwCyl);
     
-    shape = union(shape, stl, str, sbl, sbr);
+    const shape = union(centerHole, stl, str, sbl, sbr);
     
     return rotateX(Math.PI / 2, shape);
 }
