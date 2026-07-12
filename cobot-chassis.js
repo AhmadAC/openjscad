@@ -1,4 +1,4 @@
-// OpenJSCAD Script - Cobot Chassis
+// OpenJSCAD Script - Cobot Chassis & Lid
 const { booleans, colors, extrusions, primitives, transforms } = jscadModeling;
 const { subtract, union } = booleans;
 const { colorize } = colors;
@@ -32,7 +32,7 @@ function main(parts) {
   const backChamfer = translate([0, 64, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
   solid = union(solid, leftChamfer, rightChamfer, frontChamfer, backChamfer);
 
-  // 2. INNER CUTOUTS
+  // 2. INNER CUTOUTS (Hollowing)
   const innerMainBase = roundedRectangle({ size: [overallWidth - wallThickness * 2, overallDepth - wallThickness * 2], roundRadius: cornerRadius - 1, segments: 32 });
   const innerMain = translate([0, 0, bottomHeight + wallThickness], extrudeLinear({height: mainHeight + 10}, innerMainBase));
   
@@ -43,11 +43,23 @@ function main(parts) {
   let hollow = union(innerMain, innerBottom);
   solid = subtract(solid, hollow);
 
+  // 2.5 ADD LID MOUNTING BLOCK (Inside top edge of the back wall)
+  // This gives the M2 screw 10mm of solid plastic to bite into.
+  const mountBlock = translate([0, 76.0, totalHeight - 5.0], cuboid({size: [12.0, 4.0, 10.0]}));
+  solid = union(solid, mountBlock);
+
   // 3. MAIN CHASSIS ASSEMBLY
   parts.add("CobotChassis", solid);
   parts.pos("CobotChassis", [0.00, 0.00, 0.00]);
   parts.rot("CobotChassis", [0.00, 0.00, 0.00]);
   parts.scale("CobotChassis", [1.00, 1.00, 1.00]);
+
+  // 3.5 LID FASTENER HOLE IN CHASSIS (1.7mm Pilot for M2 thread)
+  const lidPilotHole = cylinder({radius: 0.85, height: 15.0, segments: 16});
+  parts.addHole("CobotChassis", "LidScrewHole", lidPilotHole);
+  parts.pos("LidScrewHole", [0.00, 76.00, 95.80 - 5.0]); 
+  parts.rot("LidScrewHole", [0.00, 0.00, 0.00]);
+  parts.scale("LidScrewHole", [1.00, 1.00, 1.00]);
 
   // 4. FRONT FACE: HC-SR04 & ESP32-S3 Camera
   parts.addHole("CobotChassis", "Ultrasonic", hcSr04Cutout());
@@ -100,34 +112,61 @@ function main(parts) {
   parts.rot("SwitchBack", [0.00, 0.00, 0.00]);
   parts.scale("SwitchBack", [1.00, 1.00, 1.00]);
 
+  // 7. GENERATE AND POSITION THE LID
+  parts.add("CobotLid", buildLid());
+  parts.pos("CobotLid", [170.00, 0.00, 5.00]); // Shifted right and lifted 5mm to sit level on the grid
+  parts.rot("CobotLid", [0.00, 0.00, 0.00]);
+  parts.scale("CobotLid", [1.00, 1.00, 1.00]);
+
   return parts.render();
 }
 
 // ------------------------------------
-// CUSTOM MACRO CUTS
+// CUSTOM MACRO CUTS & PART BUILDERS
 // ------------------------------------
 
+function buildLid() {
+    const lidThick = 5.0; // Thickened to 5.0mm. Prevents PLA warping from motor/ESP heat & ambient temps
+    const lipDepth = 5.0; // Thickened to 5.0mm deep flange for structural rigidity
+    
+    // 1. Main flat top (Matches 160x160 chassis outer dimension perfectly)
+    const lidBase = roundedRectangle({ size: [160, 160], roundRadius: 12.0, segments: 32 });
+    const lidMain = translate([0, 0, lidThick / 2], extrudeLinear({height: lidThick}, lidBase));
+    
+    // 2. Inner Flange / Groove
+    // Inner chassis is 156x156. We make the lip 155.4 to give a 0.3mm slide-fit gap all around.
+    const lipBase = roundedRectangle({ size: [155.4, 155.4], roundRadius: 10.7, segments: 32 });
+    const lidLip = translate([0, 0, -lipDepth / 2], extrudeLinear({height: lipDepth}, lipBase));
+    
+    let lidSolid = union(lidMain, lidLip);
+    
+    // 3. Cut a notch in the lip to clear the mounting block we added to the chassis
+    const blockCutout = translate([0, 76.5, -lipDepth / 2], cuboid({size: [14.0, 5.0, lipDepth + 2.0]}));
+    lidSolid = subtract(lidSolid, blockCutout);
+    
+    // 4. M2 Screw Pass-through and Countersink Hole
+    const clearanceHole = cylinder({radius: 1.15, height: 15.0, segments: 16}); // 2.3mm hole, extended height for thick lid
+    // Counterbore adjusted for the thick lid to keep the M2 head recessed and bite into the plastic
+    const counterbore = translate([0, 0, lidThick - 1.0], cylinder({radius: 2.2, height: 3.0, segments: 32})); 
+    
+    const screwHole = translate([0, 76.0, 0], union(clearanceHole, counterbore));
+    lidSolid = subtract(lidSolid, screwHole);
+    
+    return lidSolid;
+}
+
 function hcSr04Cutout() { 
-    // Two circular "eyes" for the 16mm ultrasonic cylinders
     const eye = rotateX(Math.PI / 2, cylinder({radius: 8.2, height: 20, segments: 32}));
     const leftEye = translate([-12.75, 0, 0], eye);
     const rightEye = translate([12.75, 0, 0], eye);
     
-    // Internal Alignment Pocket: Sized to 46x21mm (for your 45x20mm board)
-    // Cut exactly 1mm deep into the inner face of the 2mm front wall.
     const pocket = translate([0, 2.0, 0], cuboid({size: [46.0, 2.0, 21.0]}));
-    
     return union(leftEye, rightEye, pocket);
 }
 
 function esp32CameraCutout() {
-    // Snap-fit hole for the 8.5x8.5mm OV3660 camera head
     const lens = cuboid({size: [8.6, 20.0, 8.6]});
-    
-    // Internal Alignment Pocket: Sized to 22x19mm (for the 21x17.8mm XIAO Sense board)
-    // Cut exactly 1mm deep into the inner face of the 2mm front wall.
     const pocket = translate([0, 2.0, 0], cuboid({size: [22.0, 2.0, 19.0]}));
-    
     return union(lens, pocket);
 }
 
@@ -137,7 +176,6 @@ function sg90Cutout() {
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
     const screw1 = translate([0, 14.15, 0], screw);
     const screw2 = translate([0, -14.15, 0], screw);
-    
     return union(slot, screw1, screw2);
 }
 
@@ -150,7 +188,6 @@ function speakerCutout() {
     const str = translate([screwOffset, screwOffset, 0], screwCyl);
     const sbl = translate([-screwOffset, -screwOffset, 0], screwCyl);
     const sbr = translate([screwOffset, -screwOffset, 0], screwCyl);
-    
     const shape = union(centerHole, stl, str, sbl, sbr);
     return rotateX(Math.PI / 2, shape);
 }
