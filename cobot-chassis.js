@@ -64,6 +64,15 @@ function main(parts) {
   parts.rot("SensorRight", [0.00, 0.00, 0.00]);
   parts.scale("SensorRight", [1.00, 1.00, 1.00]);
 
+  // 4.5 XIAO ESP32-S3 SENSE CAMERA HOLE (OV3660)
+  // Camera head is ~8.5x8.5mm. Sized to 8.6mm for a tight PLA snap-fit.
+  // Centered precisely at Z=82.0 (Leaves 13mm above and below for the board to fit inside).
+  const camHole = cuboid({size: [8.6, 20.0, 8.6]});
+  parts.addHole("CobotChassis", "CameraHole", camHole);
+  parts.pos("CameraHole", [0.00, -80.00, 82.00]); 
+  parts.rot("CameraHole", [0.00, 0.00, 0.00]);
+  parts.scale("CameraHole", [1.00, 1.00, 1.00]);
+
   // 5. SIDE-WALL MG90S SERVOS
   const servoShape = sg90Cutout();
 
