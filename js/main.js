@@ -565,10 +565,17 @@ document.getElementById('btn-export').addEventListener('click', () => {
     // Serve as raw byte stream
     const blob = new Blob([stlBuffer], { type: 'application/octet-stream' });
     const link = document.createElement('a');
+    link.style.display = 'none';
+    document.body.appendChild(link);
     
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = 'model.stl'; 
     link.click();
+
+    // Clean up
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 });
 
 // Import STL Logic

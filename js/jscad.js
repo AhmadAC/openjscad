@@ -126,14 +126,14 @@ export function jscadToThreeGeometry(jscadObj) {
 
             let faces = [];
             try {
-                // Dynamically resolve different environments (Three.js extras, window global, or mapbox global earcut library)
+                // Now safely utilizes Mapbox Earcut attached to Window
                 let triangulator = null;
-                if (typeof THREE.Earcut !== 'undefined' && typeof THREE.Earcut.triangulate === 'function') {
-                    triangulator = THREE.Earcut.triangulate;
-                } else if (typeof window.earcut === 'function') {
+                if (typeof window.earcut === 'function') {
                     triangulator = window.earcut;
                 } else if (typeof earcut === 'function') {
                     triangulator = earcut;
+                } else if (typeof THREE.Earcut !== 'undefined' && typeof THREE.Earcut.triangulate === 'function') {
+                    triangulator = THREE.Earcut.triangulate;
                 }
 
                 if (triangulator) {
@@ -148,7 +148,9 @@ export function jscadToThreeGeometry(jscadObj) {
                 } else if (typeof THREE.ShapeUtils !== 'undefined' && THREE.ShapeUtils.triangulateShape) {
                      faces = THREE.ShapeUtils.triangulateShape(contour, []);
                 }
-            } catch(e) { }
+            } catch(e) { 
+                console.warn("Triangulation error", e); 
+            }
 
             if (faces && faces.length > 0) {
                 for (let i = 0; i < faces.length; i++) {
@@ -179,8 +181,9 @@ export function jscadToThreeGeometry(jscadObj) {
                         }
                     }
                 }
-            } else {
-                // Ultimate failsafe simple-fan mapping
+            } else if (v.length === 3 || v.length === 4) {
+                // Failsafe simple-fan mapping ONLY for strictly simple quads.
+                // NEVER fan a complex concave n-gon, as it will self-intersect across voids!
                 for (let i = 2; i < v.length; i++) {
                     positions.push(v[0][0], v[0][1], v[0][2]);
                     positions.push(v[i-1][0], v[i-1][1], v[i-1][2]);
