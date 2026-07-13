@@ -54,7 +54,7 @@ function main(parts) {
   const cornerTabs = intersect(rawTabs, innerMain);
   solid = union(solid, cornerTabs);
 
-  // 2.5 ADD LID MOUNTING BLOCK (Hulled bracket to ensure it is fully anchored to the wall for 3D printing)
+  // 2.5 ADD LID MOUNTING BLOCK
   const topPlate = translate([0, 71.0, totalHeight - 7.5], cuboid({size: [12.0, 6.0, 5.0]}));
   const wallAnchor = translate([0, 78.0, totalHeight - 12.5], cuboid({size: [12.0, 4.0, 15.0]}));
   const mountBlock = hull(topPlate, wallAnchor); 
@@ -182,9 +182,15 @@ function hcSr04Cutout() {
 }
 
 function esp32CameraCutout() {
-    const lens = cuboid({size: [8.6, 20.0, 8.6]});
-    const pocket = translate([0, 2.0, 0], cuboid({size: [22.0, 2.0, 19.0]}));
-    return union(lens, pocket);
+    // 1. Tidy 9mm diameter front hole for the lens itself. 
+    // Shifted vertically (+4.5) because the lens on these boards sits near the top edge.
+    const lensHole = translate([0, 0, 4.5], rotateX(Math.PI / 2, cylinder({radius: 4.5, height: 20.0, segments: 32})));
+    
+    // 2. Shallow 32x27mm pocket on the INSIDE wall only.
+    // This gives a flat area to seat the board so you can easily tape it.
+    const insidePocket = translate([0, 2.0, 0], cuboid({size: [32.0, 2.0, 27.0]}));
+    
+    return union(lensHole, insidePocket);
 }
 
 function sg90Cutout() {
@@ -214,8 +220,9 @@ function mockHCSR04() {
 }
 
 function mockCamera() {
-    const pcb = translate([0, 2.0, 0], cuboid({size: [21.0, 2.0, 18.0]}));
-    const lens = cuboid({size: [8.0, 6.0, 8.0]});
+    // Shows the taped PCB and the lens fitting neatly through the smaller 9mm hole
+    const pcb = translate([0, 2.0, 0], cuboid({size: [21.0, 2.0, 17.5]})); // ESP32 board size
+    const lens = translate([0, 0.5, 4.5], rotateX(Math.PI / 2, cylinder({radius: 4.0, height: 5.0, segments: 32})));
     return union(pcb, lens);
 }
 
