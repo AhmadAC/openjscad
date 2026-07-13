@@ -26,7 +26,6 @@ function main(parts) {
   let solid = union(outerMain, outerBottom);
 
   // Scaled 45-degree structural transition chamfers bridging the bottom base to the wider main body
-  // Applied ONLY to the front and back (Sides left flat for servo clearance)
   const chSize = 22.62; 
   const frontChamfer = translate([0, -64, bottomHeight], rotateX(Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
   const backChamfer = translate([0, 64, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
@@ -44,8 +43,6 @@ function main(parts) {
   solid = subtract(solid, hollow);
 
   // 2.1 CORNER SUPPORT TABS FOR THE LID
-  // Lowered by exactly 5mm. Center Z = 85.8, Height = 10.0 
-  // This means the top surface is exactly at 90.8 (leaving 5.0mm for the lid to sit flush inside)
   const tabZ = totalHeight - 10.0; 
   const rawTabs = union(
       translate([-76, -76, tabZ], cuboid({size: [12.0, 12.0, 10.0]})),
@@ -54,16 +51,13 @@ function main(parts) {
       translate([ 76,  76, tabZ], cuboid({size: [12.0, 12.0, 10.0]}))
   );
   
-  // Intersect with 'innerMain' guarantees they perfectly conform to the inner curved walls
   const cornerTabs = intersect(rawTabs, innerMain);
   solid = union(solid, cornerTabs);
 
   // 2.5 ADD LID MOUNTING BLOCK (Hulled bracket to ensure it is fully anchored to the wall for 3D printing)
-  // The topPlate centers on the lid screw hole, while the wallAnchor firmly embeds into the inner wall
   const topPlate = translate([0, 71.0, totalHeight - 7.5], cuboid({size: [12.0, 6.0, 5.0]}));
   const wallAnchor = translate([0, 78.0, totalHeight - 12.5], cuboid({size: [12.0, 4.0, 15.0]}));
-  const mountBlock = hull(topPlate, wallAnchor); // Generates a smooth, printable ~38-degree overhang slope
-  
+  const mountBlock = hull(topPlate, wallAnchor); 
   solid = union(solid, mountBlock);
 
   // 3. MAIN CHASSIS ASSEMBLY
@@ -72,14 +66,14 @@ function main(parts) {
   parts.rot("CobotChassis", [0.00, 0.00, 0.00]);
   parts.scale("CobotChassis", [1.00, 1.00, 1.00]);
 
-  // 3.5 LID FASTENER HOLE IN CHASSIS (1.7mm Pilot for M2 thread)
+  // 3.5 LID FASTENER HOLE IN CHASSIS
   const lidPilotHole = cylinder({radius: 0.85, height: 15.0, segments: 16});
   parts.addHole("CobotChassis", "LidScrewHole", lidPilotHole);
-  parts.pos("LidScrewHole", [0.00, 71.00, totalHeight - 10.0]); // Matches the center of the mountBlock's topPlate
+  parts.pos("LidScrewHole", [0.00, 71.00, totalHeight - 10.0]);
   parts.rot("LidScrewHole", [0.00, 0.00, 0.00]);
   parts.scale("LidScrewHole", [1.00, 1.00, 1.00]);
 
-  // 4. FRONT FACE: HC-SR04 & ESP32-S3 Camera
+  // 4. FRONT FACE: HC-SR04 & ESP32-S3 Camera Cutouts
   parts.addHole("CobotChassis", "Ultrasonic", hcSr04Cutout());
   parts.pos("Ultrasonic", [0.00, -80.00, 60.00]);
   parts.rot("Ultrasonic", [0.00, 0.00, 0.00]);
@@ -90,7 +84,7 @@ function main(parts) {
   parts.rot("Camera", [0.00, 0.00, 0.00]);
   parts.scale("Camera", [1.00, 1.00, 1.00]);
 
-  // 5. SIDE-WALL MG90S SERVOS
+  // 5. SIDE-WALL MG90S SERVO Cutouts
   const servoShape = sg90Cutout();
 
   parts.addHole("CobotChassis", "ServoFL", servoShape);
@@ -113,7 +107,7 @@ function main(parts) {
   parts.rot("ServoRR", [0.00, 0.00, 0.00]);
   parts.scale("ServoRR", [1.00, 1.00, 1.00]);
 
-  // 6. BACK WALL CUTOUTS (Speaker, Switch, USB-C Charge Port)
+  // 6. BACK WALL CUTOUTS
   parts.addHole("CobotChassis", "SpeakerBack", speakerCutout());
   parts.pos("SpeakerBack", [0.00, 80.00, 60.00]);
   parts.rot("SpeakerBack", [0.00, 0.00, 0.00]);
@@ -132,9 +126,31 @@ function main(parts) {
 
   // 7. GENERATE AND POSITION THE LID
   parts.add("CobotLid", buildLid());
-  parts.pos("CobotLid", [170.00, 0.00, 0.00]); // Placed flat on Z=0
+  parts.pos("CobotLid", [170.00, 0.00, 0.00]); // Default placement. Click "Animate Lid" to snap to [0, 0, 90.8]
   parts.rot("CobotLid", [0.00, 0.00, 0.00]);
   parts.scale("CobotLid", [1.00, 1.00, 1.00]);
+
+  // 8. ADD INTERNAL MOCK COMPONENTS (Electronics purely for visual reference)
+  parts.add("Mock_Ultrasonic", mockHCSR04(), { color: 0x228822, isMock: true });
+  parts.pos("Mock_Ultrasonic", [0.00, -80.00, 60.00]);
+
+  parts.add("Mock_Camera", mockCamera(), { color: 0x111111, isMock: true });
+  parts.pos("Mock_Camera", [0.00, -80.00, 82.00]);
+
+  parts.add("Mock_ServoFL", mockServo(), { color: 0x114488, isMock: true });
+  parts.pos("Mock_ServoFL", [-32.50, -45.00, 8.25]);
+
+  parts.add("Mock_ServoRL", mockServo(), { color: 0x114488, isMock: true });
+  parts.pos("Mock_ServoRL", [-32.50, 45.00, 8.25]);
+
+  parts.add("Mock_ServoFR", mockServo(), { color: 0x114488, isMock: true });
+  parts.pos("Mock_ServoFR", [32.50, -45.00, 8.25]);
+
+  parts.add("Mock_ServoRR", mockServo(), { color: 0x114488, isMock: true });
+  parts.pos("Mock_ServoRR", [32.50, 45.00, 8.25]);
+
+  parts.add("Mock_Speaker", mockSpeaker(), { color: 0x444444, isMock: true });
+  parts.pos("Mock_Speaker", [0.00, 78.00, 60.00]);
 
   return parts.render();
 }
@@ -145,13 +161,9 @@ function main(parts) {
 
 function buildLid() {
     const lidThick = 5.0; 
-    
-    // 1. Flush Solid Plate (Fits entirely INSIDE the chassis)
-    // The chassis inner cavity is 156.0. We make the lid 155.4 for a perfect slide-in snap fit.
     const lidBase = roundedRectangle({ size: [155.4, 155.4], roundRadius: 10.7, segments: 32 });
     let lidSolid = translate([0, 0, lidThick / 2], extrudeLinear({height: lidThick}, lidBase));
     
-    // 2. M2 Screw Pass-through and Countersink Hole
     const clearanceHole = cylinder({radius: 1.15, height: 15.0, segments: 16}); 
     const counterbore = translate([0, 0, lidThick - 1.0], cylinder({radius: 2.2, height: 3.0, segments: 32})); 
     
@@ -165,7 +177,6 @@ function hcSr04Cutout() {
     const eye = rotateX(Math.PI / 2, cylinder({radius: 8.2, height: 20, segments: 32}));
     const leftEye = translate([-12.75, 0, 0], eye);
     const rightEye = translate([12.75, 0, 0], eye);
-    
     const pocket = translate([0, 2.0, 0], cuboid({size: [46.0, 2.0, 21.0]}));
     return union(leftEye, rightEye, pocket);
 }
@@ -180,20 +191,42 @@ function sg90Cutout() {
     const slot = cuboid({size: [20.0, 23.2, 12.5]});
     const screwRadius = 0.85; 
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
-    const screw1 = translate([0, 14.15, 0], screw);
-    const screw2 = translate([0, -14.15, 0], screw);
-    return union(slot, screw1, screw2);
+    return union(slot, translate([0, 14.15, 0], screw), translate([0, -14.15, 0], screw));
 }
 
 function speakerCutout() {
     const centerHole = cylinder({radius: 12.5, height: 20.0, segments: 64});
-    const screwRadius = 0.8; 
-    const screwCyl = cylinder({radius: screwRadius, height: 20.0, segments: 16});
-    const screwOffset = 11.5;
-    const stl = translate([-screwOffset, screwOffset, 0], screwCyl);
-    const str = translate([screwOffset, screwOffset, 0], screwCyl);
-    const sbl = translate([-screwOffset, -screwOffset, 0], screwCyl);
-    const sbr = translate([screwOffset, -screwOffset, 0], screwCyl);
-    const shape = union(centerHole, stl, str, sbl, sbr);
+    const screwCyl = cylinder({radius: 0.8, height: 20.0, segments: 16});
+    const off = 11.5;
+    const shape = union(
+        centerHole, 
+        translate([-off, off, 0], screwCyl), translate([off, off, 0], screwCyl),
+        translate([-off, -off, 0], screwCyl), translate([off, -off, 0], screwCyl)
+    );
     return rotateX(Math.PI / 2, shape);
+}
+
+// --- VISUAL ELECTRONICS MOCKS ---
+function mockHCSR04() { 
+    const pcb = translate([0, 2.0, 0], cuboid({size: [45.0, 2.0, 20.0]}));
+    const eye = rotateX(Math.PI / 2, cylinder({radius: 7.8, height: 12, segments: 32}));
+    return union(pcb, translate([-12.75, -5.0, 0], eye), translate([12.75, -5.0, 0], eye));
+}
+
+function mockCamera() {
+    const pcb = translate([0, 2.0, 0], cuboid({size: [21.0, 2.0, 18.0]}));
+    const lens = cuboid({size: [8.0, 6.0, 8.0]});
+    return union(pcb, lens);
+}
+
+function mockServo() {
+    const body = cuboid({size: [19.0, 22.0, 11.5]});
+    const tab = cuboid({size: [19.0, 30.0, 2.0]});
+    return union(body, tab);
+}
+
+function mockSpeaker() {
+    const centerHole = cylinder({radius: 12.0, height: 5.0, segments: 32});
+    const mag = translate([0, 0, -4], cylinder({radius: 6.0, height: 6.0, segments: 16}));
+    return rotateX(Math.PI / 2, union(centerHole, mag));
 }

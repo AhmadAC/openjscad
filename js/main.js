@@ -8,6 +8,7 @@ const editorEl = document.getElementById('code-editor');
 let partMeshes = [], holeMeshes = [], selectedMeshes = [], stlMeshes = [];
 let currentMode = 'orbit';
 let showRuler = false;
+let isAnimated = false;
 
 // --- Undo / Redo State ---
 let codeHistory = [];
@@ -83,6 +84,12 @@ for (let i = 0; i < 150; i++) {
 // --- Core Render Logic ---
 function generatePreview() {
     try {
+        // Reset animation state whenever the script rebuilds to prevent desync
+        isAnimated = false;
+        if (window.lidAnimationReq) cancelAnimationFrame(window.lidAnimationReq);
+        const btnAnimate = document.getElementById('btn-animate');
+        if (btnAnimate) btnAnimate.classList.remove('active');
+
         const parts = new PartList();
         const wrapper = editorEl.value + `\n return typeof main !== 'undefined' ? main(parts) : null;`;
         const func = new Function('jscadModeling', 'parts', wrapper);
@@ -99,7 +106,12 @@ function generatePreview() {
             // Render solids
             results.forEach(res => {
                 if (res.type === 'part') {
-                    const mesh = new THREE.Mesh(jscadToThreeGeometry(res.geom), matSolid.clone());
+                    const isMockComponent = res.meta && res.meta.isMock;
+                    const color = res.meta && res.meta.color !== undefined ? res.meta.color : 0x0077ff;
+                    const mat = matSolid.clone();
+                    mat.color.setHex(color);
+
+                    const mesh = new THREE.Mesh(jscadToThreeGeometry(res.geom), mat);
                     
                     const edgesGeom = new THREE.EdgesGeometry(mesh.geometry, 30);
                     const edgesMat = new THREE.LineBasicMaterial({ color: 0x001144, transparent: true, opacity: 0.4 });
@@ -109,6 +121,10 @@ function generatePreview() {
                     // Attach meta
                     mesh.userData = { id: res.id, type: 'part', meta: res.meta };
                     mesh.position.set(...res.pos); mesh.rotation.set(...res.rot); mesh.scale.set(...res.scl);
+                    
+                    // Mock electronics are hidden by default!
+                    mesh.visible = isMockComponent ? false : true; 
+                    
                     scene.add(mesh); partMeshes.push(mesh);
                 }
             });
@@ -165,7 +181,6 @@ function renderLabels() {
             let isCylinder = false;
             let dia = 0, len = 0, lenAxis = '';
 
-            // If it's explicitly tagged as a complex shape like a speaker, DON'T evaluate it as a cylinder.
             if (meta.type !== 'speaker') {
                 if (Math.abs(valX - valY) < eps && Math.abs(valY - valZ) > eps) { isCylinder = true; dia = valX; len = valZ; lenAxis = 'Z'; }
                 else if (Math.abs(valX - valZ) < eps && Math.abs(valX - valY) > eps) { isCylinder = true; dia = valX; len = valY; lenAxis = 'Y'; }
@@ -184,17 +199,12 @@ function renderLabels() {
                     pts.push({ p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: len, color: '#ff6666', prefix: 'L' });
                 }
             } else {
-                // Formatting for solids and complex box cutouts
                 pts = [
                     { p: new THREE.Vector3((min.x + max.x)/2, min.y - offset, min.z - offset), val: valX, color: '#ff6666', prefix: 'W' },
-                    { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: mesh.userData.type === 'hole' ? 'L' : 'D' }, // Automatically swaps D for L if it's a hole!
+                    { p: new THREE.Vector3(max.x + offset, (min.y + max.y)/2, min.z - offset), val: valY, color: '#66ff66', prefix: mesh.userData.type === 'hole' ? 'L' : 'D' },
                     { p: new THREE.Vector3(max.x + offset, max.y + offset, (min.z + max.z)/2), val: valZ, color: '#66aaff', prefix: 'H' }
                 ];
-                
-                // Read custom metadata attributes mapping specifically assigned from cobot-chassis.js!
-                if (meta.type === 'speaker' && meta.cornerR) {
-                    pts.push({ p: new THREE.Vector3(max.x + offset, max.y + offset, max.z + offset), val: meta.cornerR, color: '#ffcc00', prefix: 'Corner R' });
-                }
+                if (meta.type === 'speaker' && meta.cornerR) pts.push({ p: new THREE.Vector3(max.x + offset, max.y + offset, max.z + offset), val: meta.cornerR, color: '#ffcc00', prefix: 'Corner R' });
             }
 
             pts.forEach(axis => {
@@ -264,8 +274,10 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
 
-    // Allow STL meshes to be fully selected just like generated parts
-    const intersects = raycaster.intersectObjects([...partMeshes, ...holeMeshes, ...stlMeshes], false);
+    // Filter out parts that are currently hidden (like mock electronics when not animated)
+    const interactableMeshes = [...partMeshes, ...holeMeshes, ...stlMeshes].filter(m => m.visible);
+    const intersects = raycaster.intersectObjects(interactableMeshes, false);
+    
     if (intersects.length > 0) {
         const clickedMesh = intersects[0].object;
         if (e.shiftKey) {
@@ -298,7 +310,8 @@ window.addEventListener('pointerup', (e) => {
 
         if (maxX - minX < 2 && maxY - minY < 2) return;
         const selected = [];
-        [...partMeshes, ...holeMeshes, ...stlMeshes].forEach(m => {
+        const interactableMeshes = [...partMeshes, ...holeMeshes, ...stlMeshes].filter(m => m.visible);
+        interactableMeshes.forEach(m => {
             const pos = new THREE.Vector3(); m.getWorldPosition(pos); pos.project(camera);
             const screenX = (pos.x * 0.5 + 0.5) * rect.width, screenY = -(pos.y * 0.5 - 0.5) * rect.height;
             if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY && pos.z < 1) selected.push(m);
@@ -313,7 +326,6 @@ transformControl.addEventListener('dragging-changed', (e) => controls.enabled = 
 transformControl.addEventListener('mouseUp', () => {
     if (selectedMeshes.length === 1) {
         const mesh = selectedMeshes[0];
-        // Only update code if it's a generated part. For STLs, the transform control inherently moves them visually!
         if (mesh.userData.type !== 'stl') {
             editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
             editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'rot', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]);
@@ -325,7 +337,6 @@ transformControl.addEventListener('mouseUp', () => {
 });
 
 window.addEventListener('keydown', (e) => {
-    // Check Undo / Redo / Copy / Paste independently of focus
     if (e.ctrlKey) {
         const key = e.key.toLowerCase();
         if (key === 'z') { e.preventDefault(); undo(); return; }
@@ -372,6 +383,56 @@ window.addEventListener('keydown', (e) => {
 // --- UI Events (Tools Panel) ---
 document.getElementById('btn-generate').addEventListener('click', () => { saveState(); generatePreview(); });
 
+// Animated Assembly Preview Logic
+document.getElementById('btn-animate').addEventListener('click', () => {
+    const lidId = "CobotLid";
+    const lidMesh = partMeshes.find(m => m.userData.id === lidId);
+    if (!lidMesh) return alert("Part 'CobotLid' not found in scene.");
+    
+    isAnimated = !isAnimated;
+    
+    // Toggle internal mock components on and off
+    partMeshes.forEach(m => {
+        if (m.userData.meta && m.userData.meta.isMock) {
+            m.visible = isAnimated;
+        }
+    });
+    
+    // Read its parsed structural coordinate right from the code logic if we don't have a starting position saved yet
+    if (!lidMesh.userData.originalPos) {
+        lidMesh.userData.originalPos = lidMesh.position.clone();
+    }
+    
+    // Target position logic
+    const targetPos = isAnimated ? new THREE.Vector3(0, 0, 90.8) : lidMesh.userData.originalPos;
+    const startPos = lidMesh.position.clone();
+    
+    let progress = 0;
+    if (window.lidAnimationReq) cancelAnimationFrame(window.lidAnimationReq);
+    
+    const btn = document.getElementById('btn-animate');
+    btn.style.pointerEvents = 'none';
+    btn.classList.toggle('active', isAnimated);
+    
+    function animateLid() {
+        progress += 0.04;
+        if (progress >= 1) {
+            lidMesh.position.copy(targetPos);
+            btn.style.pointerEvents = 'auto';
+            return;
+        }
+        const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress; // Quadratic easing
+        lidMesh.position.lerpVectors(startPos, targetPos, ease);
+        
+        if (selectedMeshes.includes(lidMesh) && transformControl.object === lidMesh) {
+            transformControl.updateMatrixWorld();
+        }
+        
+        window.lidAnimationReq = requestAnimationFrame(animateLid);
+    }
+    animateLid();
+});
+
 document.getElementById('btn-toggle-ruler').addEventListener('click', (e) => {
     showRuler = !showRuler;
     const btn = document.getElementById('btn-toggle-ruler');
@@ -389,27 +450,24 @@ document.getElementById('btn-duplicate').addEventListener('click', () => {
     const stlsToDuplicate = selectedMeshes.filter(m => m.userData.type === 'stl');
     const codeIdsToDuplicate = selectedMeshes.filter(m => m.userData.type !== 'stl').map(m => m.userData.id);
 
-    // Duplicate programmatic generated parts
     if (codeIdsToDuplicate.length > 0) {
         editorEl.value = duplicateParts(editorEl.value, codeIdsToDuplicate);
         saveState();
         generatePreview();
     }
 
-    // Duplicate manual STLs instances directly in the active ThreeJS Scene
     if (stlsToDuplicate.length > 0) {
         const newSelection = [];
         stlsToDuplicate.forEach(m => {
             const clone = m.clone();
-            clone.position.x += 5; // Offset slightly so it's noticeable
+            clone.position.x += 5; 
             clone.userData = { ...m.userData, id: 'STL_' + Math.random().toString(36).substr(2, 9) };
-            clone.material = m.material.clone(); // Ensure material is independent so emission highlights don't bleed across clones
+            clone.material = m.material.clone(); 
             scene.add(clone);
             stlMeshes.push(clone);
             newSelection.push(clone);
         });
         
-        // Update selection state directly to the new clones if ONLY STLs were cloned
         if (codeIdsToDuplicate.length === 0) selectMeshes(newSelection);
     }
 });
@@ -418,14 +476,12 @@ document.getElementById('btn-delete').addEventListener('click', () => {
     const stlsToDelete = selectedMeshes.filter(m => m.userData.type === 'stl');
     const codeIdsToDelete = selectedMeshes.filter(m => m.userData.type !== 'stl').map(m => m.userData.id);
     
-    // Delete programmatic generated parts
     if (codeIdsToDelete.length > 0) {
         editorEl.value = deleteParts(editorEl.value, codeIdsToDelete);
         saveState();
         generatePreview();
     }
     
-    // Delete manual STLs instances from the visual scene mapping
     if (stlsToDelete.length > 0) {
         stlsToDelete.forEach(m => {
             scene.remove(m);
@@ -433,7 +489,6 @@ document.getElementById('btn-delete').addEventListener('click', () => {
             if (m.material) m.material.dispose();
             stlMeshes = stlMeshes.filter(stl => stl !== m);
         });
-        // Discard selected state from removed STLs
         selectMeshes(selectedMeshes.filter(m => m.userData.type !== 'stl'));
     }
 });
@@ -447,8 +502,9 @@ document.getElementById('btn-export').addEventListener('click', () => {
     const exportScene = new THREE.Scene();
     
     partMeshes.forEach(m => {
-        // Create a completely clean mesh strictly from the geometry for export
-        // This prevents children like the wireframe edges and invisible hole meshes from being copied
+        // Absolutely EXCLUDE mock electronic components from being accidentally compiled into the final 3D print file
+        if (m.userData.meta && m.userData.meta.isMock) return;
+
         const cleanMesh = new THREE.Mesh(m.geometry, m.material);
         cleanMesh.position.copy(m.position);
         cleanMesh.rotation.copy(m.rotation);
@@ -479,7 +535,6 @@ document.getElementById('file-import-stl').addEventListener('change', (e) => {
             const geometry = loader.parse(contents);
             geometry.computeVertexNormals();
             
-            // Clone the red base material per mesh to guarantee isolated hover emissions
             const mesh = new THREE.Mesh(geometry, matSTL.clone()); 
             const edgesGeom = new THREE.EdgesGeometry(geometry, 30);
             const edgesMat = new THREE.LineBasicMaterial({ color: 0x880000, transparent: true, opacity: 0.5 });
@@ -496,7 +551,7 @@ document.getElementById('file-import-stl').addEventListener('change', (e) => {
         }
     };
     reader.readAsArrayBuffer(file);
-    e.target.value = ''; // Reset input to allow reloading same file if desired
+    e.target.value = ''; 
 });
 
 // Dynamic Inputs
@@ -602,7 +657,7 @@ window.addEventListener('load', async () => {
         if (response.ok) editorEl.value = await response.text();
     } catch (err) { }
     
-    saveState(); // Ensure the base script is in history state index 0
+    saveState(); 
     generatePreview();
 });
 
