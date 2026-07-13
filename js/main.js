@@ -504,6 +504,9 @@ document.getElementById('btn-export').addEventListener('click', () => {
     partMeshes.forEach(m => {
         // Absolutely EXCLUDE mock electronic components from being accidentally compiled into the final 3D print file
         if (m.userData.meta && m.userData.meta.isMock) return;
+        
+        // Ensure that any globally hidden objects on the scene are ignored and not rendered in the final STL
+        if (!m.visible) return;
 
         const cleanMesh = new THREE.Mesh(m.geometry, m.material);
         cleanMesh.position.copy(m.position);
@@ -513,10 +516,17 @@ document.getElementById('btn-export').addEventListener('click', () => {
         exportScene.add(cleanMesh);
     });
     
-    const stlString = new THREE.STLExporter().parse(exportScene);
+    // EXPORT AS BINARY. This completely bypasses Tinkercad's notorious string 
+    // parser bugs where it fails to parse tiny scientific-notation coordinates.
+    const stlData = new THREE.STLExporter().parse(exportScene, { binary: true });
+    
+    // Wrap the returned DataView buffer directly into a binary octet blob
+    const blob = new Blob([stlData], { type: 'application/octet-stream' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([stlString], { type: 'text/plain' }));
-    link.download = 'model.stl'; link.click();
+    
+    link.href = URL.createObjectURL(blob);
+    link.download = 'model.stl'; 
+    link.click();
 });
 
 // Import STL Logic
