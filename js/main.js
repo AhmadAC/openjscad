@@ -356,19 +356,20 @@ function createBinarySTL(meshes) {
             ab.subVectors(v1, v2);
             cb.cross(ab);
 
-            // We must NOT drop zero-area (degenerate) triangles. 
-            // Dropping them rips open physical "holes" in the mesh shell, destroying 
-            // the manifold integrity that Tinkercad absolutely requires to render.
-            let nx = 0, ny = 0, nz = 0;
-            if (cb.lengthSq() > 1e-12) {
-                cb.normalize();
-                nx = cb.x;
-                ny = cb.y;
-                nz = cb.z;
+            // FIX FOR TINKERCAD:
+            // We MUST aggressively drop degenerate (0-area) triangles!
+            // Tinkercad strictly requires valid manifold geometry and will crash/fail 
+            // the import if it encounters normal vectors of [0,0,0] or NaN. Because STL 
+            // files lack a shared index buffer (they are just Polygon Soups), dropping a 
+            // 0-area triangle entirely does *not* create a structural hole in the mesh.
+            if (cb.lengthSq() < 1e-12 || isNaN(cb.x) || isNaN(cb.y) || isNaN(cb.z)) {
+                return; // Drop invalid or zero-area face
             }
 
+            cb.normalize();
+
             validTriangles.push({
-                nx: nx, ny: ny, nz: nz,
+                nx: cb.x, ny: cb.y, nz: cb.z,
                 v1x: v1.x, v1y: v1.y, v1z: v1.z,
                 v2x: v2.x, v2y: v2.y, v2z: v2.z,
                 v3x: v3.x, v3y: v3.y, v3z: v3.z
