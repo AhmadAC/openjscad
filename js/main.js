@@ -1,12 +1,56 @@
+// js/main.js
 import { initScene } from './scene.js';
 import { PartList, jscadToThreeGeometry } from './jscad.js';
 import { updateTransform, deleteParts, duplicateParts, applyHollow } from './editor.js';
 
 // --- Global App State ---
 const editorEl = document.getElementById('code-editor');
-let partMeshes = [], holeMeshes = [], selectedMeshes = [];
+let partMeshes = [], holeMeshes = [], selectedMeshes = [], stlMeshes = [];
 let currentMode = 'orbit';
 let showRuler = false;
+
+// --- Undo / Redo State ---
+let codeHistory = [];
+let historyIndex = -1;
+let saveTimeout = null;
+
+function pushState(value) {
+    if (historyIndex >= 0 && codeHistory[historyIndex] === value) return;
+    if (historyIndex < codeHistory.length - 1) {
+        codeHistory = codeHistory.slice(0, historyIndex + 1);
+    }
+    codeHistory.push(value);
+    if (codeHistory.length > 50) codeHistory.shift();
+    else historyIndex++;
+}
+
+function saveState() {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    pushState(editorEl.value);
+}
+
+function undo() {
+    if (historyIndex > 0) {
+        historyIndex--;
+        editorEl.value = codeHistory[historyIndex];
+        generatePreview();
+    }
+}
+
+function redo() {
+    if (historyIndex < codeHistory.length - 1) {
+        historyIndex++;
+        editorEl.value = codeHistory[historyIndex];
+        generatePreview();
+    }
+}
+
+editorEl.addEventListener('input', () => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        pushState(editorEl.value);
+    }, 500);
+});
 
 // --- Initialization ---
 const { scene, camera, renderer, container } = initScene('canvas-container');
@@ -14,9 +58,10 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 const transformControl = new THREE.TransformControls(camera, renderer.domElement);
 scene.add(transformControl);
 
-// Added flatShading to make gradients pop across angled surfaces
+// Materials
 const matSolid = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.3, metalness: 0.2, side: THREE.DoubleSide, flatShading: true });
 const matHole = new THREE.MeshStandardMaterial({ color: 0xff3333, wireframe: false, transparent: true, opacity: 0.0, depthWrite: false }); // Hidden
+const matSTL = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide, flatShading: true }); // Distinct Red
 
 // Rubber Band Box Element
 const selectionBoxEl = document.createElement('div');
@@ -84,7 +129,7 @@ function generatePreview() {
             });
         }
 
-        const restoredSelection = [...partMeshes, ...holeMeshes].filter(m => previouslySelectedIds.includes(m.userData.id));
+        const restoredSelection = [...partMeshes, ...holeMeshes, ...stlMeshes].filter(m => previouslySelectedIds.includes(m.userData.id));
         if (restoredSelection.length > 0) selectMeshes(restoredSelection);
 
     } catch (err) { console.error("Render Error:", err); }
@@ -189,19 +234,20 @@ function selectMeshes(meshes) {
     selectedMeshes.forEach(m => m.material.emissive.setHex(0x000000));
     selectedMeshes = meshes;
     
-    let isPart = false, isHole = false, selId = null;
+    let isPart = false, isHole = false, isStl = false, selId = null;
 
     selectedMeshes.forEach(m => {
         m.material.emissive.setHex(0x333333);
         if (m.userData.type === 'part') isPart = true;
         if (m.userData.type === 'hole') isHole = true;
+        if (m.userData.type === 'stl') isStl = true;
         selId = m.userData.id;
     });
 
     if (selectedMeshes.length === 1 && currentMode !== 'orbit') transformControl.attach(selectedMeshes[0]);
     else transformControl.detach();
 
-    document.getElementById('selected-properties').style.display = (isPart && !isHole && selectedMeshes.length === 1) ? 'block' : 'none';
+    document.getElementById('selected-properties').style.display = (isPart && !isHole && !isStl && selectedMeshes.length === 1) ? 'block' : 'none';
 
     if (isPart && selId) {
         const safeId = selId.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -218,7 +264,8 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
 
-    const intersects = raycaster.intersectObjects([...partMeshes, ...holeMeshes], false);
+    // Allow STL meshes to be fully selected just like generated parts
+    const intersects = raycaster.intersectObjects([...partMeshes, ...holeMeshes, ...stlMeshes], false);
     if (intersects.length > 0) {
         const clickedMesh = intersects[0].object;
         if (e.shiftKey) {
@@ -251,7 +298,7 @@ window.addEventListener('pointerup', (e) => {
 
         if (maxX - minX < 2 && maxY - minY < 2) return;
         const selected = [];
-        [...partMeshes, ...holeMeshes].forEach(m => {
+        [...partMeshes, ...holeMeshes, ...stlMeshes].forEach(m => {
             const pos = new THREE.Vector3(); m.getWorldPosition(pos); pos.project(camera);
             const screenX = (pos.x * 0.5 + 0.5) * rect.width, screenY = -(pos.y * 0.5 - 0.5) * rect.height;
             if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY && pos.z < 1) selected.push(m);
@@ -266,19 +313,35 @@ transformControl.addEventListener('dragging-changed', (e) => controls.enabled = 
 transformControl.addEventListener('mouseUp', () => {
     if (selectedMeshes.length === 1) {
         const mesh = selectedMeshes[0];
-        editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
-        editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'rot', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]);
-        editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'scale', mesh.scale.toArray());
-        generatePreview();
+        // Only update code if it's a generated part. For STLs, the transform control inherently moves them visually!
+        if (mesh.userData.type !== 'stl') {
+            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
+            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'rot', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]);
+            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'scale', mesh.scale.toArray());
+            saveState();
+            generatePreview();
+        }
     }
 });
 
 window.addEventListener('keydown', (e) => {
+    // Check Undo / Redo / Copy / Paste independently of focus
+    if (e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z') { e.preventDefault(); undo(); return; }
+        if (key === 'y') { e.preventDefault(); redo(); return; }
+        if (key === 'c' || key === 'v' || key === 'd') {
+            e.preventDefault(); 
+            document.getElementById('btn-duplicate').click();
+            return;
+        }
+    }
+
     if (document.activeElement === editorEl || document.activeElement.tagName === 'INPUT') return;
     
     if (e.key === 'Delete' || e.key === 'Backspace') {
-        editorEl.value = deleteParts(editorEl.value, selectedMeshes.map(m => m.userData.id));
-        generatePreview();
+        document.getElementById('btn-delete').click();
+        return;
     }
     
     let dx=0, dy=0, dz=0; const step = e.shiftKey ? 4.0 : 1.0;
@@ -290,17 +353,24 @@ window.addEventListener('keydown', (e) => {
 
     if ((dx||dy||dz) && selectedMeshes.length > 0) {
         e.preventDefault();
+        let codeChanged = false;
         selectedMeshes.forEach(mesh => {
             mesh.position.x += dx; mesh.position.y += dy; mesh.position.z += dz;
-            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
+            if (mesh.userData.type !== 'stl') {
+                editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
+                codeChanged = true;
+            }
         });
-        generatePreview();
+        if (codeChanged) {
+            saveState();
+            generatePreview();
+        }
     }
 });
 
 
 // --- UI Events (Tools Panel) ---
-document.getElementById('btn-generate').addEventListener('click', generatePreview);
+document.getElementById('btn-generate').addEventListener('click', () => { saveState(); generatePreview(); });
 
 document.getElementById('btn-toggle-ruler').addEventListener('click', (e) => {
     showRuler = !showRuler;
@@ -316,13 +386,56 @@ document.getElementById('mode-select').addEventListener('change', (e) => {
 });
 
 document.getElementById('btn-duplicate').addEventListener('click', () => {
-    editorEl.value = duplicateParts(editorEl.value, selectedMeshes.map(m=>m.userData.id));
-    generatePreview();
+    const stlsToDuplicate = selectedMeshes.filter(m => m.userData.type === 'stl');
+    const codeIdsToDuplicate = selectedMeshes.filter(m => m.userData.type !== 'stl').map(m => m.userData.id);
+
+    // Duplicate programmatic generated parts
+    if (codeIdsToDuplicate.length > 0) {
+        editorEl.value = duplicateParts(editorEl.value, codeIdsToDuplicate);
+        saveState();
+        generatePreview();
+    }
+
+    // Duplicate manual STLs instances directly in the active ThreeJS Scene
+    if (stlsToDuplicate.length > 0) {
+        const newSelection = [];
+        stlsToDuplicate.forEach(m => {
+            const clone = m.clone();
+            clone.position.x += 5; // Offset slightly so it's noticeable
+            clone.userData = { ...m.userData, id: 'STL_' + Math.random().toString(36).substr(2, 9) };
+            clone.material = m.material.clone(); // Ensure material is independent so emission highlights don't bleed across clones
+            scene.add(clone);
+            stlMeshes.push(clone);
+            newSelection.push(clone);
+        });
+        
+        // Update selection state directly to the new clones if ONLY STLs were cloned
+        if (codeIdsToDuplicate.length === 0) selectMeshes(newSelection);
+    }
 });
 
 document.getElementById('btn-delete').addEventListener('click', () => {
-    editorEl.value = deleteParts(editorEl.value, selectedMeshes.map(m=>m.userData.id));
-    generatePreview();
+    const stlsToDelete = selectedMeshes.filter(m => m.userData.type === 'stl');
+    const codeIdsToDelete = selectedMeshes.filter(m => m.userData.type !== 'stl').map(m => m.userData.id);
+    
+    // Delete programmatic generated parts
+    if (codeIdsToDelete.length > 0) {
+        editorEl.value = deleteParts(editorEl.value, codeIdsToDelete);
+        saveState();
+        generatePreview();
+    }
+    
+    // Delete manual STLs instances from the visual scene mapping
+    if (stlsToDelete.length > 0) {
+        stlsToDelete.forEach(m => {
+            scene.remove(m);
+            if (m.geometry) m.geometry.dispose();
+            if (m.material) m.material.dispose();
+            stlMeshes = stlMeshes.filter(stl => stl !== m);
+        });
+        // Discard selected state from removed STLs
+        selectMeshes(selectedMeshes.filter(m => m.userData.type !== 'stl'));
+    }
 });
 
 document.getElementById('btn-recenter').addEventListener('click', () => { controls.target.set(0,0,0); camera.position.set(60,-80,60); controls.update(); });
@@ -332,11 +445,58 @@ document.getElementById('btn-zoomout').addEventListener('click', () => { camera.
 document.getElementById('btn-export').addEventListener('click', () => {
     if (!partMeshes.length) return alert("Nothing to export.");
     const exportScene = new THREE.Scene();
-    partMeshes.forEach(m => exportScene.add(m.clone()));
+    
+    partMeshes.forEach(m => {
+        // Create a completely clean mesh strictly from the geometry for export
+        // This prevents children like the wireframe edges and invisible hole meshes from being copied
+        const cleanMesh = new THREE.Mesh(m.geometry, m.material);
+        cleanMesh.position.copy(m.position);
+        cleanMesh.rotation.copy(m.rotation);
+        cleanMesh.scale.copy(m.scale);
+        cleanMesh.updateMatrixWorld(true);
+        exportScene.add(cleanMesh);
+    });
+    
     const stlString = new THREE.STLExporter().parse(exportScene);
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([stlString], { type: 'text/plain' }));
     link.download = 'model.stl'; link.click();
+});
+
+// Import STL Logic
+document.getElementById('btn-import-stl').addEventListener('click', () => {
+    document.getElementById('file-import-stl').click();
+});
+
+document.getElementById('file-import-stl').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const contents = event.target.result;
+        const loader = new THREE.STLLoader();
+        try {
+            const geometry = loader.parse(contents);
+            geometry.computeVertexNormals();
+            
+            // Clone the red base material per mesh to guarantee isolated hover emissions
+            const mesh = new THREE.Mesh(geometry, matSTL.clone()); 
+            const edgesGeom = new THREE.EdgesGeometry(geometry, 30);
+            const edgesMat = new THREE.LineBasicMaterial({ color: 0x880000, transparent: true, opacity: 0.5 });
+            const edges = new THREE.LineSegments(edgesGeom, edgesMat);
+            
+            mesh.add(edges);
+            mesh.userData = { type: 'stl', isReferenceSTL: true, id: 'STL_' + Math.random().toString(36).substr(2, 9) };
+            
+            scene.add(mesh);
+            stlMeshes.push(mesh);
+        } catch (err) {
+            console.error(err);
+            alert("Error parsing STL. Ensure it's a valid binary or ASCII STL.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = ''; // Reset input to allow reloading same file if desired
 });
 
 // Dynamic Inputs
@@ -357,6 +517,7 @@ document.getElementById('btn-add-shape').addEventListener('click', () => {
     
     const snippet = `\n    parts.add("${id}", ${geomStr});\n    parts.pos("${id}", [0.00, 0.00, 0.00]);\n    parts.rot("${id}", [0.00, 0.00, 0.00]);\n    parts.scale("${id}", [1.00, 1.00, 1.00]);\n`;
     editorEl.value = editorEl.value.replace(/(\s*return\s+parts\.render)/, snippet + '$1');
+    saveState();
     generatePreview();
 });
 
@@ -365,6 +526,7 @@ const triggerHollow = () => {
     const isChecked = document.getElementById('toggle-hollow').checked;
     const factor = document.getElementById('hollow-factor').value;
     editorEl.value = applyHollow(editorEl.value, selectedMeshes[0].userData.id, isChecked, factor);
+    saveState();
     generatePreview();
 };
 document.getElementById('toggle-hollow').addEventListener('change', (e) => {
@@ -404,6 +566,7 @@ document.getElementById('btn-add-hole').addEventListener('click', () => {
     if(targetLine.test(editorEl.value)) editorEl.value = editorEl.value.replace(targetLine, `$1${snippet}`);
     else editorEl.value = editorEl.value.replace(/(\s*return\s+parts\.render)/, snippet + '$1');
     
+    saveState();
     generatePreview();
 });
 
@@ -438,6 +601,8 @@ window.addEventListener('load', async () => {
         const response = await fetch('./cobot-chassis.js');
         if (response.ok) editorEl.value = await response.text();
     } catch (err) { }
+    
+    saveState(); // Ensure the base script is in history state index 0
     generatePreview();
 });
 

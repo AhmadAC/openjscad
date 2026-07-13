@@ -12,6 +12,7 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     
     <!-- JSCAD Modeling (OpenJSCAD v2) -->
     <script src="https://unpkg.com/@jscad/modeling@2.12.1/dist/jscad-modeling.min.js"></script>
@@ -56,6 +57,10 @@
                 <button id="btn-export" title="Export STL">
                     <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> STL
                 </button>
+                <button id="btn-import-stl" title="View Reference STL">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="15"/></svg> View
+                </button>
+                <input type="file" id="file-import-stl" accept=".stl" style="display: none;">
             </div>
             
             <textarea id="code-editor" spellcheck="false"></textarea>
@@ -74,7 +79,7 @@
             
             <div id="overlay-hint">
                 <b>Click</b> select | <b>Shift+Drag</b> multi-select<br>
-                <b>Arrows/WS</b> move
+                <b>Arrows/WS</b> move | <b>Ctrl+Z/Y</b> undo/redo
             </div>
         </div>
 
