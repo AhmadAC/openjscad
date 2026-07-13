@@ -380,6 +380,93 @@ window.addEventListener('keydown', (e) => {
 });
 
 
+// --- Custom Binary STL Exporter (Bulletproof for Tinkercad) ---
+function createBinarySTL(meshes) {
+    let totalTriangles = 0;
+    
+    // Calculate total number of triangles across all meshes
+    meshes.forEach(m => {
+        const geom = m.geometry;
+        if (geom.index) {
+            totalTriangles += geom.index.count / 3;
+        } else {
+            totalTriangles += geom.attributes.position.count / 3;
+        }
+    });
+
+    // Binary STL Format: 80 bytes header + 4 bytes for tri count + 50 bytes per triangle
+    const bufferLength = 84 + (50 * totalTriangles);
+    const buffer = new ArrayBuffer(bufferLength);
+    const view = new DataView(buffer);
+
+    // Set triangle count at byte offset 80
+    view.setUint32(80, totalTriangles, true);
+
+    let offset = 84;
+    const v1 = new THREE.Vector3();
+    const v2 = new THREE.Vector3();
+    const v3 = new THREE.Vector3();
+    const cb = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+
+    meshes.forEach(m => {
+        m.updateMatrixWorld(true);
+        const matrix = m.matrixWorld;
+        const geom = m.geometry;
+        const pos = geom.attributes.position;
+        const ind = geom.index;
+
+        function writeTriangle(a, b, c) {
+            v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
+            v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
+            v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
+
+            // Compute precise face normal
+            cb.subVectors(v3, v2);
+            ab.subVectors(v1, v2);
+            cb.cross(ab);
+            if (cb.lengthSq() > 0) cb.normalize();
+            else cb.set(0, 0, 0); // Failsafe for zero-area triangles
+
+            // Write Normal (3x Float32)
+            view.setFloat32(offset, cb.x, true); offset += 4;
+            view.setFloat32(offset, cb.y, true); offset += 4;
+            view.setFloat32(offset, cb.z, true); offset += 4;
+
+            // Write Vertex 1 (3x Float32)
+            view.setFloat32(offset, v1.x, true); offset += 4;
+            view.setFloat32(offset, v1.y, true); offset += 4;
+            view.setFloat32(offset, v1.z, true); offset += 4;
+
+            // Write Vertex 2 (3x Float32)
+            view.setFloat32(offset, v2.x, true); offset += 4;
+            view.setFloat32(offset, v2.y, true); offset += 4;
+            view.setFloat32(offset, v2.z, true); offset += 4;
+
+            // Write Vertex 3 (3x Float32)
+            view.setFloat32(offset, v3.x, true); offset += 4;
+            view.setFloat32(offset, v3.y, true); offset += 4;
+            view.setFloat32(offset, v3.z, true); offset += 4;
+
+            // Attribute byte count (usually 0)
+            view.setUint16(offset, 0, true); offset += 2;
+        }
+
+        if (ind) {
+            for (let i = 0; i < ind.count; i += 3) {
+                writeTriangle(ind.getX(i), ind.getX(i + 1), ind.getX(i + 2));
+            }
+        } else {
+            for (let i = 0; i < pos.count; i += 3) {
+                writeTriangle(i, i + 1, i + 2);
+            }
+        }
+    });
+
+    return buffer;
+}
+
+
 // --- UI Events (Tools Panel) ---
 document.getElementById('btn-generate').addEventListener('click', () => { saveState(); generatePreview(); });
 
@@ -499,29 +586,25 @@ document.getElementById('btn-zoomout').addEventListener('click', () => { camera.
 
 document.getElementById('btn-export').addEventListener('click', () => {
     if (!partMeshes.length) return alert("Nothing to export.");
-    const exportScene = new THREE.Scene();
     
-    partMeshes.forEach(m => {
-        // Absolutely EXCLUDE mock electronic components from being accidentally compiled into the final 3D print file
-        if (m.userData.meta && m.userData.meta.isMock) return;
-        
-        // Ensure that any globally hidden objects on the scene are ignored and not rendered in the final STL
-        if (!m.visible) return;
-
-        const cleanMesh = new THREE.Mesh(m.geometry, m.material);
-        cleanMesh.position.copy(m.position);
-        cleanMesh.rotation.copy(m.rotation);
-        cleanMesh.scale.copy(m.scale);
-        cleanMesh.updateMatrixWorld(true);
-        exportScene.add(cleanMesh);
+    // Gather all valid meshes for export
+    const meshesToExport = partMeshes.filter(m => {
+        // Absolutely EXCLUDE mock electronic components
+        if (m.userData.meta && m.userData.meta.isMock) return false;
+        // EXCLUDE globally hidden objects
+        if (!m.visible) return false;
+        return true;
     });
+
+    if (meshesToExport.length === 0) {
+        return alert("Everything is currently hidden or mock parts. Nothing to export!");
+    }
+
+    // Call our robust custom Binary STL function
+    const stlBuffer = createBinarySTL(meshesToExport);
     
-    // EXPORT AS BINARY. This completely bypasses Tinkercad's notorious string 
-    // parser bugs where it fails to parse tiny scientific-notation coordinates.
-    const stlData = new THREE.STLExporter().parse(exportScene, { binary: true });
-    
-    // Wrap the returned DataView buffer directly into a binary octet blob
-    const blob = new Blob([stlData], { type: 'application/octet-stream' });
+    // Serve as raw byte stream
+    const blob = new Blob([stlBuffer], { type: 'application/octet-stream' });
     const link = document.createElement('a');
     
     link.href = URL.createObjectURL(blob);

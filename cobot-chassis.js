@@ -17,19 +17,23 @@ function main(parts) {
   const mainHeight = totalHeight - bottomHeight;
   const wallThickness = 2.0; 
   const cornerRadius = 12.0; 
+  const bottomRadius = 5.0; // Radius for the curved rectangular bottom edges
 
   // 1. OUTER SHELL
   const outerMainBase = roundedRectangle({ size: [overallWidth, overallDepth], roundRadius: cornerRadius, segments: 32 });
   const outerMain = translate([0, 0, bottomHeight], extrudeLinear({height: mainHeight}, outerMainBase));
   
-  const outerBottom = translate([0, 0, bottomHeight / 2], cuboid({size: [80, 128, bottomHeight]}));
-  let solid = union(outerMain, outerBottom);
-
+  const outerBottomBase = roundedRectangle({ size: [80, 128], roundRadius: bottomRadius, segments: 32 });
+  const outerBottom = extrudeLinear({height: bottomHeight}, outerBottomBase);
+  
   // Scaled 45-degree structural transition chamfers bridging the bottom base to the wider main body
-  const chSize = 22.62; 
-  const frontChamfer = translate([0, -64, bottomHeight], rotateX(Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
-  const backChamfer = translate([0, 64, bottomHeight], rotateX(-Math.PI / 4, cuboid({ size: [80, chSize, chSize] })));
-  solid = union(solid, frontChamfer, backChamfer);
+  // We use a hull between two matching rounded profiles to ensure the chamfer corners curve perfectly in line with the base.
+  const chamferSlice1 = translate([0, 0, 16], extrudeLinear({height: 0.1}, outerBottomBase));
+  const chamferSlice2Base = roundedRectangle({ size: [80, overallDepth], roundRadius: bottomRadius, segments: 32 });
+  const chamferSlice2 = translate([0, 0, bottomHeight - 0.1], extrudeLinear({height: 0.2}, chamferSlice2Base));
+  const chamferSolid = hull(chamferSlice1, chamferSlice2);
+
+  let solid = union(outerMain, outerBottom, chamferSolid);
 
   // 2. INNER CUTOUTS (Hollowing)
   const innerMainBase = roundedRectangle({ size: [overallWidth - wallThickness * 2, overallDepth - wallThickness * 2], roundRadius: cornerRadius - 1, segments: 32 });
@@ -37,7 +41,8 @@ function main(parts) {
   
   const innerBottomWidth = 80.0 - (wallThickness * 2); 
   const innerBottomDepth = 128.0 - (wallThickness * 2); 
-  const innerBottom = translate([0, 0, (bottomHeight + 10) / 2 + 2], cuboid({size: [innerBottomWidth, innerBottomDepth, bottomHeight + 10]}));
+  const innerBottomBase = roundedRectangle({ size: [innerBottomWidth, innerBottomDepth], roundRadius: Math.max(0.1, bottomRadius - wallThickness), segments: 32 });
+  const innerBottom = translate([0, 0, 2], extrudeLinear({height: bottomHeight + 10}, innerBottomBase));
   
   const hollow = union(innerMain, innerBottom);
   solid = subtract(solid, hollow);
@@ -194,10 +199,19 @@ function esp32CameraCutout() {
 }
 
 function sg90Cutout() {
-    const slot = cuboid({size: [20.0, 23.2, 12.5]});
-    const screwRadius = 0.85; 
+    // Widened to 23.6 x 12.8 for PLA tolerances
+    const slot = cuboid({size: [20.0, 23.6, 12.8]});
+    
+    // Increased to 0.95 radius (1.9mm diam) to prevent PLA from splitting
+    const screwRadius = 0.95; 
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
-    return union(slot, translate([0, 14.15, 0], screw), translate([0, -14.15, 0], screw));
+    
+    // Shifted spacing to 13.8 (27.6mm total) to perfectly match MG90S ears
+    return union(
+        slot, 
+        translate([0, 13.8, 0], screw), 
+        translate([0, -13.8, 0], screw)
+    );
 }
 
 function speakerCutout() {

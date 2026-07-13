@@ -1,3 +1,4 @@
+// js/jscad.js
 export class PartList {
     constructor() { 
         this.items = {}; 
@@ -65,12 +66,62 @@ export function jscadToThreeGeometry(jscadObj) {
     geometries.forEach(g => {
         if (!geom3.isA(g)) return; 
         const polygons = geom3.toPolygons(g);
+        
         polygons.forEach(p => {
             const v = p.vertices;
-            for (let i = 2; i < v.length; i++) {
+            if (v.length < 3) return;
+
+            // A standard triangle is perfectly manifold out of the box
+            if (v.length === 3) {
                 positions.push(v[0][0], v[0][1], v[0][2]);
-                positions.push(v[i-1][0], v[i-1][1], v[i-1][2]);
-                positions.push(v[i][0], v[i][1], v[i][2]);
+                positions.push(v[1][0], v[1][1], v[1][2]);
+                positions.push(v[2][0], v[2][1], v[2][2]);
+                return;
+            }
+
+            // COMPLEX CONCAVE POLYGON -> Requires true "EarCut" triangulation.
+            // 1. Calculate an accurate normal to safely project 3D space to a 2D plane
+            const cb = new THREE.Vector3();
+            const ab = new THREE.Vector3();
+            const normal = new THREE.Vector3();
+
+            // Find the first valid non-collinear vertex triplet
+            for(let i = 0; i < v.length - 2; i++) {
+                const v0 = new THREE.Vector3(v[i][0], v[i][1], v[i][2]);
+                const v1 = new THREE.Vector3(v[i+1][0], v[i+1][1], v[i+1][2]);
+                const v2 = new THREE.Vector3(v[i+2][0], v[i+2][1], v[i+2][2]);
+                cb.subVectors(v2, v1);
+                ab.subVectors(v0, v1);
+                normal.crossVectors(cb, ab);
+                if (normal.lengthSq() > 0.000001) break; 
+            }
+            normal.normalize();
+
+            const nx = Math.abs(normal.x);
+            const ny = Math.abs(normal.y);
+            const nz = Math.abs(normal.z);
+
+            // 2. Project the 3D polygon onto the best-aligned 2D plane
+            const contour = [];
+            for (let i = 0; i < v.length; i++) {
+                if (nx >= ny && nx >= nz) {
+                    contour.push(new THREE.Vector2(v[i][1], v[i][2]));
+                } else if (ny >= nx && ny >= nz) {
+                    contour.push(new THREE.Vector2(v[i][0], v[i][2]));
+                } else {
+                    contour.push(new THREE.Vector2(v[i][0], v[i][1]));
+                }
+            }
+
+            // 3. Triangulate the 2D contour using Three.js's internal EarCut algorithm
+            const faces = THREE.ShapeUtils.triangulateShape(contour, []);
+
+            // 4. Trace the resulting 2D map triangles back to the original 3D vertex array
+            for (let i = 0; i < faces.length; i++) {
+                const face = faces[i];
+                positions.push(v[face[0]][0], v[face[0]][1], v[face[0]][2]);
+                positions.push(v[face[1]][0], v[face[1]][1], v[face[1]][2]);
+                positions.push(v[face[2]][0], v[face[2]][1], v[face[2]][2]);
             }
         });
     });
