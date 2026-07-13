@@ -54,20 +54,29 @@ export class PartList {
 
 export function jscadToThreeGeometry(jscadObj) {
     const { geom3 } = window.jscadModeling.geometries;
+    const { generalize } = window.jscadModeling.modifiers || {};
+    
     const geometries = Array.isArray(jscadObj) ? jscadObj : [jscadObj];
     const positions = [];
 
     geometries.forEach(g => {
         if (!geom3.isA(g)) return; 
+        
+        // 1. KERNEL-LEVEL TRIANGULATION
+        let processedGeom = g;
+        if (generalize) {
+            try {
+                processedGeom = generalize({ snap: true, triangulate: true }, g);
+            } catch(e) { console.warn("Generalize failed:", e); }
+        }
 
-        // We completely bypass jscad's generalize/snap modifier to prevent deforming curves into stars!
-        const polygons = geom3.toPolygons(g);
+        const polygons = geom3.toPolygons(processedGeom);
         
         polygons.forEach(p => {
             const v = p.vertices;
             if (v.length < 3) return;
 
-            // Fast path for simple native triangles
+            // Fast path for simple triangles
             if (v.length === 3) {
                 positions.push(v[0][0], v[0][1], v[0][2]);
                 positions.push(v[1][0], v[1][1], v[1][2]);
@@ -75,7 +84,7 @@ export function jscadToThreeGeometry(jscadObj) {
                 return;
             }
 
-            // --- ROBUST CONCAVE TRIANGULATION ---
+            // --- ROBUST CONCAVE TRIANGULATION FALLBACK ---
             // Newell's Method for a robust geometric normal
             let nx = 0, ny = 0, nz = 0;
             for (let i = 0; i < v.length; i++) {
@@ -102,7 +111,7 @@ export function jscadToThreeGeometry(jscadObj) {
             U.normalize();
             const V = new THREE.Vector3().crossVectors(N, U).normalize();
 
-            // Project to 2D using dot products
+            // Project to 2D
             let contour = [];
             let vMap = [];
             for (let i = 0; i < v.length; i++) {
@@ -126,31 +135,20 @@ export function jscadToThreeGeometry(jscadObj) {
 
             let faces = [];
             try {
-                // Now safely utilizes Mapbox Earcut attached to Window
-                let triangulator = null;
-                if (typeof window.earcut === 'function') {
-                    triangulator = window.earcut;
-                } else if (typeof earcut === 'function') {
-                    triangulator = earcut;
-                } else if (typeof THREE.Earcut !== 'undefined' && typeof THREE.Earcut.triangulate === 'function') {
-                    triangulator = THREE.Earcut.triangulate;
-                }
-
-                if (triangulator) {
+                // Call Earcut directly, bypassing ShapeUtils' fragile validation rules
+                if (typeof THREE.Earcut !== 'undefined' && typeof THREE.Earcut.triangulate === 'function') {
                     const flatPoints = [];
                     for (let i = 0; i < contour.length; i++) {
                         flatPoints.push(contour[i].x, contour[i].y);
                     }
-                    const triangles = triangulator(flatPoints, null, 2);
+                    const triangles = THREE.Earcut.triangulate(flatPoints, null, 2);
                     for (let i = 0; i < triangles.length; i += 3) {
                         faces.push([triangles[i], triangles[i+1], triangles[i+2]]);
                     }
                 } else if (typeof THREE.ShapeUtils !== 'undefined' && THREE.ShapeUtils.triangulateShape) {
                      faces = THREE.ShapeUtils.triangulateShape(contour, []);
                 }
-            } catch(e) { 
-                console.warn("Triangulation error", e); 
-            }
+            } catch(e) { }
 
             if (faces && faces.length > 0) {
                 for (let i = 0; i < faces.length; i++) {
@@ -169,7 +167,6 @@ export function jscadToThreeGeometry(jscadObj) {
                         
                         if (triN.lengthSq() > 1e-12) {
                             if (triN.dot(N) < 0) {
-                                // Flipped winding detected! Swap indices to restore manifold.
                                 positions.push(pt0.x, pt0.y, pt0.z);
                                 positions.push(pt2.x, pt2.y, pt2.z);
                                 positions.push(pt1.x, pt1.y, pt1.z);
@@ -181,9 +178,8 @@ export function jscadToThreeGeometry(jscadObj) {
                         }
                     }
                 }
-            } else if (v.length === 3 || v.length === 4) {
-                // Failsafe simple-fan mapping ONLY for strictly simple quads.
-                // NEVER fan a complex concave n-gon, as it will self-intersect across voids!
+            } else {
+                // Ultimate failsafe simple-fan mapping
                 for (let i = 2; i < v.length; i++) {
                     positions.push(v[0][0], v[0][1], v[0][2]);
                     positions.push(v[i-1][0], v[i-1][1], v[i-1][2]);

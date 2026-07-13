@@ -335,8 +335,6 @@ function createBinarySTL(meshes) {
         m.updateMatrixWorld(true);
         const matrix = m.matrixWorld;
         
-        // Detect if the user scaled the part negatively (which reverses winding rules)
-        // If a mesh has a negative determinant, we MUST manually swap the orientation
         const isMirrored = matrix.determinant() < 0; 
         
         const geom = m.geometry;
@@ -348,31 +346,33 @@ function createBinarySTL(meshes) {
             v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
             v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
 
-            // Re-flip inverted meshes back into a legal format for CAD apps
             if (isMirrored) {
                 const tmp = v2.clone();
                 v2.copy(v3);
                 v3.copy(tmp);
             }
 
-            // Compute precise face normal natively
             cb.subVectors(v3, v2);
             ab.subVectors(v1, v2);
             cb.cross(ab);
 
-            // Tinkercad strictly requires clean manifold geometry.
-            // Degenerate (zero-area) triangles completely shatter Tinkercad's import processor.
-            // By filtering them via distance squared limits, we ensure bulletproof Tinkercad imports.
+            // We must NOT drop zero-area (degenerate) triangles. 
+            // Dropping them rips open physical "holes" in the mesh shell, destroying 
+            // the manifold integrity that Tinkercad absolutely requires to render.
+            let nx = 0, ny = 0, nz = 0;
             if (cb.lengthSq() > 1e-12) {
                 cb.normalize();
-                
-                validTriangles.push({
-                    nx: cb.x, ny: cb.y, nz: cb.z,
-                    v1x: v1.x, v1y: v1.y, v1z: v1.z,
-                    v2x: v2.x, v2y: v2.y, v2z: v2.z,
-                    v3x: v3.x, v3y: v3.y, v3z: v3.z
-                });
+                nx = cb.x;
+                ny = cb.y;
+                nz = cb.z;
             }
+
+            validTriangles.push({
+                nx: nx, ny: ny, nz: nz,
+                v1x: v1.x, v1y: v1.y, v1z: v1.z,
+                v2x: v2.x, v2y: v2.y, v2z: v2.z,
+                v3x: v3.x, v3y: v3.y, v3z: v3.z
+            });
         }
 
         if (ind) {
