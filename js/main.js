@@ -321,78 +321,72 @@ window.addEventListener('pointerup', (e) => {
 });
 
 
-// --- Interactions (Gizmo & Keys) ---
-transformControl.addEventListener('dragging-changed', (e) => controls.enabled = !e.value);
-transformControl.addEventListener('mouseUp', () => {
-    if (selectedMeshes.length === 1) {
-        const mesh = selectedMeshes[0];
-        if (mesh.userData.type !== 'stl') {
-            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
-            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'rot', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]);
-            editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'scale', mesh.scale.toArray());
-            saveState();
-            generatePreview();
-        }
-    }
-});
-
-window.addEventListener('keydown', (e) => {
-    if (e.ctrlKey) {
-        const key = e.key.toLowerCase();
-        if (key === 'z') { e.preventDefault(); undo(); return; }
-        if (key === 'y') { e.preventDefault(); redo(); return; }
-        if (key === 'c' || key === 'v' || key === 'd') {
-            e.preventDefault(); 
-            document.getElementById('btn-duplicate').click();
-            return;
-        }
-    }
-
-    if (document.activeElement === editorEl || document.activeElement.tagName === 'INPUT') return;
-    
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-        document.getElementById('btn-delete').click();
-        return;
-    }
-    
-    let dx=0, dy=0, dz=0; const step = e.shiftKey ? 4.0 : 1.0;
-    switch(e.key) {
-        case 'ArrowUp': dy = step; break; case 'ArrowDown': dy = -step; break;
-        case 'ArrowLeft': dx = -step; break; case 'ArrowRight': dx = step; break;
-        case 'w': case 'W': dz = step; break; case 's': case 'S': dz = -step; break;
-    }
-
-    if ((dx||dy||dz) && selectedMeshes.length > 0) {
-        e.preventDefault();
-        let codeChanged = false;
-        selectedMeshes.forEach(mesh => {
-            mesh.position.x += dx; mesh.position.y += dy; mesh.position.z += dz;
-            if (mesh.userData.type !== 'stl') {
-                editorEl.value = updateTransform(editorEl.value, mesh.userData.id, 'pos', mesh.position.toArray());
-                codeChanged = true;
-            }
-        });
-        if (codeChanged) {
-            saveState();
-            generatePreview();
-        }
-    }
-});
-
-
 // --- Custom Binary STL Exporter (Bulletproof for Tinkercad) ---
 function createBinarySTL(meshes) {
-    let totalTriangles = 0;
+    const validTriangles = [];
     
-    // Calculate total number of triangles across all meshes
+    const v1 = new THREE.Vector3();
+    const v2 = new THREE.Vector3();
+    const v3 = new THREE.Vector3();
+    const cb = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+
     meshes.forEach(m => {
+        m.updateMatrixWorld(true);
+        const matrix = m.matrixWorld;
+        
+        // Detect if the user scaled the part negatively (which reverses winding rules)
+        // If a mesh has a negative determinant, we MUST manually swap the orientation
+        const isMirrored = matrix.determinant() < 0; 
+        
         const geom = m.geometry;
-        if (geom.index) {
-            totalTriangles += geom.index.count / 3;
+        const pos = geom.attributes.position;
+        const ind = geom.index;
+
+        function processTriangle(a, b, c) {
+            v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
+            v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
+            v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
+
+            // Re-flip inverted meshes back into a legal format for CAD apps
+            if (isMirrored) {
+                const tmp = v2.clone();
+                v2.copy(v3);
+                v3.copy(tmp);
+            }
+
+            // Compute precise face normal natively
+            cb.subVectors(v3, v2);
+            ab.subVectors(v1, v2);
+            cb.cross(ab);
+
+            // Tinkercad strictly requires clean manifold geometry.
+            // Degenerate (zero-area) triangles completely shatter Tinkercad's import processor.
+            // By filtering them via distance squared limits, we ensure bulletproof Tinkercad imports.
+            if (cb.lengthSq() > 1e-12) {
+                cb.normalize();
+                
+                validTriangles.push({
+                    nx: cb.x, ny: cb.y, nz: cb.z,
+                    v1x: v1.x, v1y: v1.y, v1z: v1.z,
+                    v2x: v2.x, v2y: v2.y, v2z: v2.z,
+                    v3x: v3.x, v3y: v3.y, v3z: v3.z
+                });
+            }
+        }
+
+        if (ind) {
+            for (let i = 0; i < ind.count; i += 3) {
+                processTriangle(ind.getX(i), ind.getX(i + 1), ind.getX(i + 2));
+            }
         } else {
-            totalTriangles += geom.attributes.position.count / 3;
+            for (let i = 0; i < pos.count; i += 3) {
+                processTriangle(i, i + 1, i + 2);
+            }
         }
     });
+    
+    const totalTriangles = validTriangles.length;
 
     // Binary STL Format: 80 bytes header + 4 bytes for tri count + 50 bytes per triangle
     const bufferLength = 84 + (50 * totalTriangles);
@@ -403,64 +397,29 @@ function createBinarySTL(meshes) {
     view.setUint32(80, totalTriangles, true);
 
     let offset = 84;
-    const v1 = new THREE.Vector3();
-    const v2 = new THREE.Vector3();
-    const v3 = new THREE.Vector3();
-    const cb = new THREE.Vector3();
-    const ab = new THREE.Vector3();
+    validTriangles.forEach(tri => {
+        // Write Normal (3x Float32)
+        view.setFloat32(offset, tri.nx, true); offset += 4;
+        view.setFloat32(offset, tri.ny, true); offset += 4;
+        view.setFloat32(offset, tri.nz, true); offset += 4;
 
-    meshes.forEach(m => {
-        m.updateMatrixWorld(true);
-        const matrix = m.matrixWorld;
-        const geom = m.geometry;
-        const pos = geom.attributes.position;
-        const ind = geom.index;
+        // Write Vertex 1 (3x Float32)
+        view.setFloat32(offset, tri.v1x, true); offset += 4;
+        view.setFloat32(offset, tri.v1y, true); offset += 4;
+        view.setFloat32(offset, tri.v1z, true); offset += 4;
 
-        function writeTriangle(a, b, c) {
-            v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
-            v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
-            v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
+        // Write Vertex 2 (3x Float32)
+        view.setFloat32(offset, tri.v2x, true); offset += 4;
+        view.setFloat32(offset, tri.v2y, true); offset += 4;
+        view.setFloat32(offset, tri.v2z, true); offset += 4;
 
-            // Compute precise face normal
-            cb.subVectors(v3, v2);
-            ab.subVectors(v1, v2);
-            cb.cross(ab);
-            if (cb.lengthSq() > 0) cb.normalize();
-            else cb.set(0, 0, 0); // Failsafe for zero-area triangles
+        // Write Vertex 3 (3x Float32)
+        view.setFloat32(offset, tri.v3x, true); offset += 4;
+        view.setFloat32(offset, tri.v3y, true); offset += 4;
+        view.setFloat32(offset, tri.v3z, true); offset += 4;
 
-            // Write Normal (3x Float32)
-            view.setFloat32(offset, cb.x, true); offset += 4;
-            view.setFloat32(offset, cb.y, true); offset += 4;
-            view.setFloat32(offset, cb.z, true); offset += 4;
-
-            // Write Vertex 1 (3x Float32)
-            view.setFloat32(offset, v1.x, true); offset += 4;
-            view.setFloat32(offset, v1.y, true); offset += 4;
-            view.setFloat32(offset, v1.z, true); offset += 4;
-
-            // Write Vertex 2 (3x Float32)
-            view.setFloat32(offset, v2.x, true); offset += 4;
-            view.setFloat32(offset, v2.y, true); offset += 4;
-            view.setFloat32(offset, v2.z, true); offset += 4;
-
-            // Write Vertex 3 (3x Float32)
-            view.setFloat32(offset, v3.x, true); offset += 4;
-            view.setFloat32(offset, v3.y, true); offset += 4;
-            view.setFloat32(offset, v3.z, true); offset += 4;
-
-            // Attribute byte count (usually 0)
-            view.setUint16(offset, 0, true); offset += 2;
-        }
-
-        if (ind) {
-            for (let i = 0; i < ind.count; i += 3) {
-                writeTriangle(ind.getX(i), ind.getX(i + 1), ind.getX(i + 2));
-            }
-        } else {
-            for (let i = 0; i < pos.count; i += 3) {
-                writeTriangle(i, i + 1, i + 2);
-            }
-        }
+        // Attribute byte count (usually 0)
+        view.setUint16(offset, 0, true); offset += 2;
     });
 
     return buffer;

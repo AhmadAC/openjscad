@@ -118,6 +118,22 @@ function main(parts) {
   parts.rot("SpeakerBack", [0.00, 0.00, 0.00]);
   parts.scale("SpeakerBack", [1.00, 1.00, 1.00]);
 
+  // Clean sequential subtraction of speaker screw holes avoids complex non-manifold polygon clusters
+  const off = 11.5;
+  const screwHoleGeom = rotateX(Math.PI / 2, cylinder({radius: 0.8, height: 20.0, segments: 12}));
+  
+  parts.addHole("CobotChassis", "SpeakerScrew1", screwHoleGeom);
+  parts.pos("SpeakerScrew1", [-off, 80.00, 60.00 + off]);
+
+  parts.addHole("CobotChassis", "SpeakerScrew2", screwHoleGeom);
+  parts.pos("SpeakerScrew2", [off, 80.00, 60.00 + off]);
+
+  parts.addHole("CobotChassis", "SpeakerScrew3", screwHoleGeom);
+  parts.pos("SpeakerScrew3", [-off, 80.00, 60.00 - off]);
+
+  parts.addHole("CobotChassis", "SpeakerScrew4", screwHoleGeom);
+  parts.pos("SpeakerScrew4", [off, 80.00, 60.00 - off]);
+
   const chargePort = rotateX(Math.PI / 2, cylinder({radius: 3.5, height: 20.0, segments: 32}));
   parts.addHole("CobotChassis", "ChargePort", chargePort);
   parts.pos("ChargePort", [-60.00, 80.00, 45.00]); 
@@ -128,6 +144,12 @@ function main(parts) {
   parts.pos("SwitchBack", [35.00, 80.00, 60.00]); 
   parts.rot("SwitchBack", [0.00, 0.00, 0.00]);
   parts.scale("SwitchBack", [1.00, 1.00, 1.00]);
+
+  const ipexHole = rotateX(Math.PI / 2, cylinder({radius: 1.1, height: 20.0, segments: 16}));
+  parts.addHole("CobotChassis", "IpexPort", ipexHole);
+  parts.pos("IpexPort", [-40.00, 80.00, 60.00]); 
+  parts.rot("IpexPort", [0.00, 0.00, 0.00]);
+  parts.scale("IpexPort", [1.00, 1.00, 1.00]);
 
   // 7. GENERATE AND POSITION THE LID
   parts.add("CobotLid", buildLid());
@@ -187,26 +209,15 @@ function hcSr04Cutout() {
 }
 
 function esp32CameraCutout() {
-    // 1. Tidy 9mm diameter front hole for the lens itself. 
-    // Shifted vertically (+4.5) because the lens on these boards sits near the top edge.
     const lensHole = translate([0, 0, 4.5], rotateX(Math.PI / 2, cylinder({radius: 4.5, height: 20.0, segments: 32})));
-    
-    // 2. Shallow 32x27mm pocket on the INSIDE wall only.
-    // This gives a flat area to seat the board so you can easily tape it.
     const insidePocket = translate([0, 2.0, 0], cuboid({size: [32.0, 2.0, 27.0]}));
-    
     return union(lensHole, insidePocket);
 }
 
 function sg90Cutout() {
-    // Widened to 23.6 x 12.8 for PLA tolerances
     const slot = cuboid({size: [20.0, 23.6, 12.8]});
-    
-    // Increased to 0.95 radius (1.9mm diam) to prevent PLA from splitting
     const screwRadius = 0.95; 
     const screw = rotateY(Math.PI / 2, cylinder({radius: screwRadius, height: 25.0, segments: 32}));
-    
-    // Shifted spacing to 13.8 (27.6mm total) to perfectly match MG90S ears
     return union(
         slot, 
         translate([0, 13.8, 0], screw), 
@@ -215,15 +226,8 @@ function sg90Cutout() {
 }
 
 function speakerCutout() {
-    const centerHole = cylinder({radius: 12.5, height: 20.0, segments: 64});
-    const screwCyl = cylinder({radius: 0.8, height: 20.0, segments: 16});
-    const off = 11.5;
-    const shape = union(
-        centerHole, 
-        translate([-off, off, 0], screwCyl), translate([off, off, 0], screwCyl),
-        translate([-off, -off, 0], screwCyl), translate([off, -off, 0], screwCyl)
-    );
-    return rotateX(Math.PI / 2, shape);
+    // Simplified to 32 segments to ensure neat, manageable geometry curves
+    return rotateX(Math.PI / 2, cylinder({radius: 12.5, height: 20.0, segments: 32}));
 }
 
 // --- VISUAL ELECTRONICS MOCKS ---
@@ -233,8 +237,8 @@ function mockHCSR04() {
     return union(pcb, translate([-12.75, -5.0, 0], eye), translate([12.75, -5.0, 0], eye));
 }
 
+// Shows the taped PCB and the lens fitting neatly through the smaller 9mm hole
 function mockCamera() {
-    // Shows the taped PCB and the lens fitting neatly through the smaller 9mm hole
     const pcb = translate([0, 2.0, 0], cuboid({size: [21.0, 2.0, 17.5]})); // ESP32 board size
     const lens = translate([0, 0.5, 4.5], rotateX(Math.PI / 2, cylinder({radius: 4.0, height: 5.0, segments: 32})));
     return union(pcb, lens);
